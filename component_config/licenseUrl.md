@@ -1,0 +1,1 @@
+https://github.com/keboola/component-ex-sas/blob/master/LICENSE.md
