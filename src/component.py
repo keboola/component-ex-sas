@@ -1,99 +1,143 @@
 """
-Template Component main class.
+SAS File Extractor Component.
 
+Extracts SAS (.sas7bdat) files from SFTP server using DuckDB and writes to Keboola Storage.
 """
 
-import csv
 import logging
 from datetime import datetime
 
-from keboola.component.base import ComponentBase
+from keboola.component.base import ComponentBase, sync_action
 from keboola.component.exceptions import UserException
+from keboola.component.sync_actions import SelectElement
 
 from configuration import Configuration
+from duckdb_client import DuckDBClient
+from sftp_client import SftpClient
 
 
 class Component(ComponentBase):
     """
-    Extends base class for general Python components. Initializes the CommonInterface
-    and performs configuration validation.
-
-    For easier debugging the data folder is picked up by default from `../data` path,
-    relative to working directory.
-
-    If `debug` parameter is present in the `config.json`, the default logger is set to verbose DEBUG mode.
+    SAS File Extractor component.
     """
 
     def __init__(self):
         super().__init__()
+        self.params = Configuration(**self.configuration.parameters)
+
+        # Initialize clients in __init__ for reuse across run() and sync_actions
+        self.sftp_client = SftpClient(self.params.sftp)
+        self.duckdb_client = DuckDBClient(
+            max_memory_mb=self.params.duckdb_max_memory_mb,
+            preserve_insertion_order=self.params.output.preserve_insertion_order,
+        )
 
     def run(self):
+        """Main execution logic."""
+        start_time = datetime.now()
+        logging.info("Starting SAS file extraction")
+
+        try:
+            # Connect to SFTP
+            self.sftp_client.connect()
+
+            # Initialize DuckDB
+            self.duckdb_client.initialize()
+
+            # Process each configured SAS file
+            files_processed = 0
+            total_rows = 0
+
+            for sas_file in self.params.sas_tables:
+                logging.info(f"Processing file: {sas_file}")
+
+                # Process the file
+                row_count = self._process_sas_file(
+                    sftp_client=self.sftp_client,
+                    duckdb_client=self.duckdb_client,
+                    sas_file=sas_file,
+                )
+
+                if row_count > 0:
+                    files_processed += 1
+                    total_rows += row_count
+                else:
+                    logging.info(f"No data in {sas_file}")
+
+            # Summary
+            duration = (datetime.now() - start_time).total_seconds()
+            logging.info(
+                f"Extraction complete: {files_processed} files processed, "
+                f"{total_rows:,} total rows extracted in {duration:.2f} seconds"
+            )
+
+        finally:
+            # Clean up connections
+            self.duckdb_client.close()
+            self.sftp_client.close()
+
+    def _process_sas_file(
+        self,
+        sftp_client: SftpClient,
+        duckdb_client: DuckDBClient,
+        sas_file: str,
+    ) -> int:
         """
-        Main execution code
+        Process a single SAS file: load to DuckDB, export to Keboola.
         """
+        table_name = self.params.get_table_name(sas_file)
+        sftp_url = sftp_client.get_sftp_url(sas_file)
 
-        # ####### EXAMPLE TO REMOVE
-        # check for missing configuration parameters
-        params = Configuration(**self.configuration.parameters)
+        # Load SAS file into DuckDB
+        row_count = duckdb_client.load_sas_file(
+            sftp_url=sftp_url,
+            table_name=table_name,
+            sftp_client=sftp_client.sftp_client,
+        )
 
-        # Access parameters in configuration
-        if params.print_hello:
-            logging.info("Hello World")
+        if row_count == 0:
+            return 0
 
-        # get input table definitions
-        input_tables = self.get_input_tables_definitions()
-        for table in input_tables:
-            logging.info(f"Received input table: {table.name} with path: {table.full_path}")
+        # Get table schema
+        schema = duckdb_client.get_table_schema(table_name)
 
-        if len(input_tables) == 0:
-            raise UserException("No input tables found")
+        # Create output table definition
+        out_table = self.create_out_table_definition(
+            f"{table_name}.csv",
+            schema=schema,
+            incremental=self.params.output.incremental,
+            has_header=True,
+        )
 
-        # get last state data/in/state.json from previous run
-        previous_state = self.get_state_file()
-        logging.info(previous_state.get("some_parameter"))
+        # Export to CSV
+        duckdb_client.export_to_csv(table_name, out_table.full_path)
 
-        # Create output table (Table definition - just metadata)
-        table = self.create_out_table_definition("output.csv", incremental=True, primary_key=["timestamp"])
+        # Write manifest
+        self.write_manifest(out_table)
 
-        # get file path of the table (data/out/tables/Features.csv)
-        out_table_path = table.full_path
-        logging.info(out_table_path)
+        logging.info(f"Successfully exported {row_count:,} rows to '{table_name}.csv'")
 
-        # Add timestamp column and save into out_table_path
-        input_table = input_tables[0]
-        with (
-            open(input_table.full_path, "r") as inp_file,
-            open(table.full_path, mode="wt", encoding="utf-8", newline="") as out_file,
-        ):
-            reader = csv.DictReader(inp_file)
+        return row_count
 
-            columns = list(reader.fieldnames)
-            # append timestamp
-            columns.append("timestamp")
+    @sync_action("list_sas_tables")
+    def list_sas_tables(self):
+        """Sync action to list SAS files from SFTP server."""
+        try:
+            self.sftp_client.connect()
 
-            # write result with column added
-            writer = csv.DictWriter(out_file, fieldnames=columns)
-            writer.writeheader()
-            for in_row in reader:
-                in_row["timestamp"] = datetime.now().isoformat()
-                writer.writerow(in_row)
+            try:
+                sas_tables = self.sftp_client.list_sas_files()
+                return [SelectElement(label=f, value=f) for f in sas_tables]
+            finally:
+                self.sftp_client.close()
 
-        # Save table manifest (output.csv.manifest) from the Table definition
-        self.write_manifest(table)
-
-        # Write new state - will be available next run
-        self.write_state_file({"some_state_parameter": "value"})
-
-        # ####### EXAMPLE TO REMOVE END
+        except Exception as e:
+            raise UserException(f"Failed to list SAS files: {e}")
 
 
-"""
-        Main entrypoint
-"""
 if __name__ == "__main__":
     try:
         comp = Component()
-        # this triggers the run method by default and is controlled by the configuration.action parameter
         comp.execute_action()
     except UserException as exc:
         logging.exception(exc)

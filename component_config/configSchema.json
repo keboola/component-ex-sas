@@ -1,19 +1,155 @@
 {
   "type": "object",
-  "title": "extractor configuration",
+  "title": "SAS File Extractor Configuration",
   "required": [
-    "print_hello"
+    "sftp",
+    "sas_files"
   ],
   "properties": {
-    "print_hello": {
-      "type": "boolean",
-      "title": "Print Hello",
+    "sftp": {
+      "type": "object",
+      "title": "SFTP Connection",
+      "required": [
+        "host",
+        "username",
+        "#password",
+        "folder_path"
+      ],
+      "properties": {
+        "host": {
+          "type": "string",
+          "title": "SFTP Host",
+          "description": "SFTP server hostname or IP address",
+          "minLength": 1,
+          "propertyOrder": 1
+        },
+        "port": {
+          "type": "integer",
+          "title": "SFTP Port",
+          "description": "SFTP server port (default: 22)",
+          "default": 22,
+          "minimum": 1,
+          "maximum": 65535,
+          "propertyOrder": 2
+        },
+        "username": {
+          "type": "string",
+          "title": "Username",
+          "description": "SFTP username",
+          "minLength": 1,
+          "propertyOrder": 3
+        },
+        "#password": {
+          "type": "string",
+          "title": "Password",
+          "description": "SFTP password (encrypted)",
+          "format": "password",
+          "minLength": 1,
+          "propertyOrder": 4
+        },
+        "folder_path": {
+          "type": "string",
+          "title": "Folder Path",
+          "description": "Path to folder containing SAS files on SFTP server (e.g., /folder/subfolder)",
+          "minLength": 1,
+          "propertyOrder": 5
+        }
+      },
       "propertyOrder": 1
+    },
+    "sas_tables": {
+      "type": "array",
+      "items": {
+        "enum": [],
+        "type": "string"
+      },
+      "title": "Tables to extract",
+      "format": "select",
+      "options": {
+        "tags": true,
+        "async": {
+          "label": "Re-load tables",
+          "action": "list_sas_tables"
+        }
+      },
+      "uniqueItems": true,
+      "propertyOrder": 2
+    },
+    "incremental": {
+      "type": "object",
+      "title": "Incremental Loading",
+      "description": "Configure incremental data loading behavior",
+      "properties": {
+        "file_level_incremental": {
+          "type": "boolean",
+          "title": "File-Level Incremental",
+          "description": "Only process new or modified files based on last modification timestamp",
+          "default": true,
+          "propertyOrder": 1
+        },
+        "data_level_incremental": {
+          "type": "boolean",
+          "title": "Data-Level Incremental",
+          "description": "Within each file, only load rows with timestamps newer than last processing",
+          "default": false,
+          "propertyOrder": 2
+        },
+        "timestamp_column": {
+          "type": "string",
+          "title": "Timestamp Column",
+          "description": "Column name containing timestamps for data-level incremental (required when Data-Level Incremental is enabled)",
+          "propertyOrder": 3
+        }
+      },
+      "propertyOrder": 3
+    },
+    "output": {
+      "type": "object",
+      "title": "Output Settings",
+      "description": "Configure how data is written to Keboola Storage",
+      "properties": {
+        "primary_key": {
+          "type": "array",
+          "title": "Primary Key",
+          "description": "Column(s) to use as primary key in Keboola Storage",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true,
+          "propertyOrder": 1
+        },
+        "incremental": {
+          "type": "boolean",
+          "title": "Incremental Write",
+          "description": "Write to Keboola Storage in incremental mode (append/update)",
+          "default": false,
+          "propertyOrder": 2
+        },
+        "preserve_insertion_order": {
+          "type": "boolean",
+          "title": "Preserve Insertion Order",
+          "description": "Maintain the order of rows from source SAS files",
+          "default": true,
+          "propertyOrder": 3
+        }
+      },
+      "propertyOrder": 4
+    },
+    "duckdb_max_memory_mb": {
+      "type": "integer",
+      "title": "DuckDB Maximum Memory (MB)",
+      "description": "Maximum memory allocation for DuckDB processing",
+      "default": 1024,
+      "minimum": 128,
+      "maximum": 16384,
+      "propertyOrder": 5
     },
     "debug": {
       "type": "boolean",
-      "title": "Debug",
-      "propertyOrder": 2
+      "title": "Debug Mode",
+      "description": "Enable detailed debug logging",
+      "default": false,
+      "propertyOrder": 6
     }
   }
 }

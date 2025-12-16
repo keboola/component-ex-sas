@@ -4,23 +4,70 @@ from keboola.component.exceptions import UserException
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
 
+class SftpConnection(BaseModel):
+    """SFTP connection configuration."""
+
+    host: str
+    port: int = 22
+    username: str
+    password: str = Field(alias="#password")
+    folder_path: str = Field(description="Base folder path on SFTP server containing SAS files")
+
+    @field_validator("folder_path")
+    def validate_folder_path(cls, v):
+        # Ensure path doesn't end with trailing slash for consistency
+        return v.rstrip("/")
+
+
+class OutputSettings(BaseModel):
+    """Output table configuration."""
+
+    primary_key: list[str] | None = Field(default=None, description="List of column names to use as primary key")
+    incremental: bool = Field(default=False, description="Write to Keboola Storage in incremental mode")
+    preserve_insertion_order: bool = Field(default=True, description="Preserve the order of rows from source SAS files")
+
+
 class Configuration(BaseModel):
-    print_hello: bool
-    api_token: str = Field(alias="#api_token")
+    """Main component configuration."""
+
+    sftp: SftpConnection
+    sas_tables: list[str]
+    output: OutputSettings = Field(default_factory=OutputSettings)
+    duckdb_max_memory_mb: int = 768
     debug: bool = False
 
     def __init__(self, **data):
         try:
             super().__init__(**data)
         except ValidationError as e:
-            error_messages = [f"{err['loc'][0]}: {err['msg']}" for err in e.errors()]
-            raise UserException(f"Validation Error: {', '.join(error_messages)}")
+            error_messages = [f"{err['loc']}: {err['msg']}" for err in e.errors()]
+            raise UserException(f"Configuration validation error: {', '.join(error_messages)}")
 
         if self.debug:
+            logging.getLogger().setLevel(logging.DEBUG)
             logging.debug("Component will run in Debug mode")
 
-    @field_validator("api_token")
-    def token_must_be_uppercase(cls, v):
-        if not v.isupper():
-            raise UserException("API token must be uppercase")
+    @field_validator("sas_tables")
+    def validate_sas_tables(cls, v):
+        if not v:
+            raise ValueError("At least one SAS file must be specified")
+
+        # Validate all files have .sas7bdat extension
+        invalid_files = [f for f in v if not f.endswith(".sas7bdat")]
+        if invalid_files:
+            raise ValueError(f"All files must have .sas7bdat extension. Invalid files: {invalid_files}")
+
         return v
+
+    def get_table_name(self, sas_filename: str) -> str:
+        """
+        Convert SAS filename to Keboola table name.
+        Removes .sas7bdat extension.
+
+        Args:
+            sas_filename: Name of SAS file (e.g., 'customers.sas7bdat')
+
+        Returns:
+            Table name (e.g., 'customers')
+        """
+        return sas_filename.replace(".sas7bdat", "")

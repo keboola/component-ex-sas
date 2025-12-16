@@ -1,1 +1,1 @@
-SAS short description
+Extract SAS files from SFTP servers using DuckDB. Supports dual incremental loading (file-level and data-level) with automatic schema detection.
