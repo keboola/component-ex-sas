@@ -70,8 +70,8 @@ class SftpClient:
             transport = self.ssh_client.get_transport()
             if transport:
                 # Increasing window size can significantly speed up SFTP transfers
-                # by allowing more data "in flight" before an acknowledgment is required.
-                transport.window_size = 2147483647
+                # 32MB is usually plenty and more stable than max int
+                transport.window_size = 32 * 1024 * 1024
                 transport.packetizer.REKEY_BYTES = 2147483647
                 transport.packetizer.REKEY_PACKETS = 2147483647
 
@@ -121,8 +121,7 @@ class SftpClient:
 
     def download_file(self, remote_path: str, local_path: str):
         """
-        Download a file from SFTP using optimized streaming and prefetching.
-        Much faster than standard sftp.get() for large files.
+        Download a file from SFTP using optimized get.
 
         Args:
             remote_path: Path on SFTP server
@@ -132,20 +131,7 @@ class SftpClient:
             raise UserException("Not connected to SFTP server.")
 
         try:
-            with self.sftp_client.open(remote_path, "rb") as remote_file:
-                # Start prefetching chunks in the background
-                remote_file.prefetch()
-
-                with open(local_path, "wb") as local_file:
-                    # Use a large buffer size for copying
-                    # 1MB chunks are generally efficient for network/disk I/O crossover
-                    buffer_size = 1024 * 1024
-                    while True:
-                        data = remote_file.read(buffer_size)
-                        if not data:
-                            break
-                        local_file.write(data)
-
+            self.sftp_client.get(remote_path, local_path)
         except Exception as e:
             raise UserException(f"Failed to download file {remote_path}: {e}")
 
