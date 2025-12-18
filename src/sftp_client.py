@@ -132,8 +132,31 @@ class SftpClient:
 
         try:
             attrs = self.sftp_client.stat(remote_path)
-            logging.info(f"Downloading {remote_path} ({attrs.st_size / 1024 / 1024:.2f} MB)")
-            self.sftp_client.get(remote_path, local_path)
+            total_size = attrs.st_size
+            logging.info(f"Downloading {remote_path} ({total_size / 1024 / 1024:.2f} MB)")
+
+            import time
+
+            start_time = time.time()
+            last_progress_time = start_time
+            last_bytes_transferred = 0
+            log_interval = 500 * 1024 * 1024  # 500 MB
+
+            def progress_callback(transferred: int, total: int):
+                nonlocal last_bytes_transferred, last_progress_time
+                if transferred - last_bytes_transferred >= log_interval:
+                    current_time = time.time()
+                    interval_duration = current_time - last_progress_time
+                    interval_mb = (transferred - last_bytes_transferred) / 1024 / 1024
+                    total_mb = transferred / 1024 / 1024
+                    logging.info(
+                        f"Progress: {total_mb:.0f}MB / {total / 1024 / 1024:.0f}MB "
+                        f"({interval_mb:.2f}MB in {interval_duration:.2f}s)"
+                    )
+                    last_bytes_transferred = transferred
+                    last_progress_time = current_time
+
+            self.sftp_client.get(remote_path, local_path, callback=progress_callback)
         except Exception as e:
             raise UserException(f"Failed to download file {remote_path}: {e}")
 
