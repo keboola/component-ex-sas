@@ -30,16 +30,10 @@ class Component(ComponentBase):
         self.duckdb_client = DuckDBClient(max_memory_mb=self.params.duckdb_max_memory_mb)
 
     def run(self):
-        """Main execution logic."""
         start_time = datetime.now()
-        logging.info("Starting SAS file extraction")
 
         try:
-            # Connect to SFTP
             self.sftp_client.connect()
-
-            # Initialize DuckDB
-            self.duckdb_client.initialize()
 
             # Process each configured SAS file
             files_processed = 0
@@ -80,12 +74,12 @@ class Component(ComponentBase):
         sas_file: str,
     ) -> int:
         """
-        Process a single SAS file: load to DuckDB, export to Keboola.
+        Process a single SAS file: load to DuckDB view, export to Keboola.
         """
         table_name = self.params.get_table_name(sas_file)
         sftp_url = sftp_client.get_sftp_url(sas_file)
 
-        # Load SAS file into DuckDB
+        # Load SAS file into DuckDB (creates a view)
         row_count = duckdb_client.load_sas_file(
             sftp_url=sftp_url,
             table_name=table_name,
@@ -113,7 +107,6 @@ class Component(ComponentBase):
         self.write_manifest(out_table)
 
         logging.info(f"Successfully exported {row_count:,} rows to '{table_name}.csv'")
-
         return row_count
 
     @sync_action("list_sas_tables")

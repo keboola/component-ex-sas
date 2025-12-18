@@ -65,7 +65,6 @@ class SftpClient:
 
             # 2. Open SFTP channel
             self.sftp_client = self.ssh_client.open_sftp()
-            logging.info("SFTP connection established")
 
             # Optimization for large file transfers
             transport = self.ssh_client.get_transport()
@@ -132,7 +131,6 @@ class SftpClient:
         if not self._connected or self.sftp_client is None:
             raise UserException("Not connected to SFTP server.")
 
-        logging.info(f"Downloading {remote_path} using optimized stream")
         try:
             with self.sftp_client.open(remote_path, "rb") as remote_file:
                 # Start prefetching chunks in the background
@@ -214,4 +212,3 @@ class SftpClient:
                 logging.warning(f"Error closing SSH client: {e}")
 
         self._connected = False
-        logging.info("SFTP connections closed")

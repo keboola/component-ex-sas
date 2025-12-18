@@ -5,6 +5,7 @@ Uses DuckDB's read_stat extension to read SAS files from local temp files.
 
 import logging
 import os
+import time
 from collections import OrderedDict
 
 import duckdb
@@ -29,22 +30,16 @@ class DuckDBClient:
 
     def __init__(self, max_memory_mb: int):
         """
-        Initialize DuckDB client.
+        Initialize DuckDB client and connection.
 
         Args:
             max_memory_mb: Maximum memory allocation in MB
-        """
-        self.max_memory_mb = max_memory_mb
-        self.conn: duckdb.DuckDBPyConnection | None = None
-        self._initialized = False
-
-    def initialize(self):
-        """
-        Initialize DuckDB connection and install read_stat extension.
 
         Raises:
             UserException: If initialization fails
         """
+        self.max_memory_mb = max_memory_mb
+
         try:
             # Create temp directory
             os.makedirs(DUCKDB_DIR, exist_ok=True)
@@ -56,21 +51,13 @@ class DuckDBClient:
                 "max_memory": f"{self.max_memory_mb}MB",
             }
 
-            # Connect to DuckDB
-            db_path = f"{DUCKDB_DIR}/sas_extractor.db"
-            logging.info(f"Initializing DuckDB at {db_path}")
-            self.conn = duckdb.connect(database=db_path, config=config)
+            self.conn = duckdb.connect(config=config)
 
-            # Disable insertion order preservation for better performance
+            # Disable insertion order to prevent OOM
             self.conn.execute("SET preserve_insertion_order = false;")
 
-            # Install and load read_stat extension from community repository
-            logging.info("Installing DuckDB read_stat extension")
             self.conn.execute("INSTALL read_stat FROM community")
             self.conn.execute("LOAD read_stat")
-            logging.info("DuckDB read_stat extension loaded successfully")
-
-            self._initialized = True
 
         except Exception as e:
             raise UserException(f"Failed to initialize DuckDB: {e}")
@@ -82,14 +69,14 @@ class DuckDBClient:
         sftp_client: SftpClient,
     ) -> int:
         """
-        Load SAS file from SFTP into DuckDB table.
+        Load SAS file from SFTP into DuckDB.
 
-        Downloads file via paramiko SFTP first, then reads with read_stat.
+        Downloads file via optimized SFTP first, then creates a DuckDB VIEW.
 
         Args:
-            sftp_url: SFTP URL to SAS file (e.g., 'sftp:///path/to/file.sas7bdat')
-            table_name: Name for DuckDB table
-            sftp_client: Paramiko SFTP client for downloading file
+            sftp_url: SFTP URL to SAS file
+            table_name: Name for DuckDB view
+            sftp_client: SftpClient instance
 
         Returns:
             Number of rows loaded
@@ -97,56 +84,32 @@ class DuckDBClient:
         Raises:
             UserException: If loading fails
         """
-        if not self._initialized or self.conn is None:
-            raise UserException("DuckDB not initialized. Call initialize() first.")
 
-        temp_file = None
+        temp_file = os.path.join(DUCKDB_DIR, f"temp_{table_name}.sas7bdat")
 
         try:
-            logging.info(f"Loading SAS file from {sftp_url} into table '{table_name}'")
-
-            # Create temp file in DuckDB directory
-            temp_file = os.path.join(DUCKDB_DIR, f"temp_{table_name}.sas7bdat")
-
-            # Extract path from sftp:// URL
+            logging.info(f"Loading SAS file from {sftp_url} into view '{table_name}'")
             remote_path = sftp_url.replace("sftp://", "")
 
-            # Download file using optimized SftpClient method
-            logging.info(f"Starting optimized download from SFTP: {remote_path}")
+            # Time the download
+            start_dl = time.time()
             sftp_client.download_file(remote_path, temp_file)
+            dl_duration = time.time() - start_dl
+            logging.info(f"File {table_name} downloaded to stage in {dl_duration:.2f} seconds")
 
-            logging.info(f"File successfully staged to {temp_file}")
-
-            # Now read_stat can read the local file
-            self.conn.execute(f"DROP TABLE IF EXISTS {table_name}")
-
-            # Build CREATE TABLE query using local file
-            query = f"CREATE TABLE {table_name} AS SELECT * FROM read_stat('{temp_file}', format = 'sas7bdat')"
-
-            logging.debug(f"Executing query: {query}")
+            query = (
+                f"CREATE OR REPLACE VIEW {table_name} AS SELECT * FROM read_stat('{temp_file}', format = 'sas7bdat')"
+            )
             self.conn.execute(query)
 
             # Get row count
-            result = self.conn.execute(f"SELECT COUNT(*) as count FROM {table_name}").fetchone()
+            result = self.conn.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()
             row_count = result[0] if result else 0
 
-            logging.info(f"Successfully loaded {row_count:,} rows into '{table_name}'")
             return row_count
 
-        except duckdb.IOException as e:
-            raise UserException(f"Failed to read SAS file: {e}")
-        except duckdb.Error as e:
-            raise UserException(f"DuckDB error loading SAS file: {e}")
         except Exception as e:
-            raise UserException(f"Unexpected error loading SAS file: {e}")
-        finally:
-            # Clean up temp file
-            if temp_file and os.path.exists(temp_file):
-                try:
-                    os.remove(temp_file)
-                    logging.debug(f"Removed temp file: {temp_file}")
-                except Exception as e:
-                    logging.warning(f"Failed to remove temp file: {e}")
+            raise UserException(f"Failed to load SAS file: {e}")
 
     def get_table_schema(self, table_name: str) -> OrderedDict:
         """
@@ -158,8 +121,6 @@ class DuckDBClient:
         Returns:
             OrderedDict mapping column names to ColumnDefinition objects
         """
-        if not self._initialized or self.conn is None:
-            raise UserException("DuckDB not initialized. Call initialize() first.")
 
         try:
             # Get table metadata
@@ -184,16 +145,14 @@ class DuckDBClient:
         """
         Export DuckDB table to CSV file.
         """
-        if not self._initialized or self.conn is None:
-            raise UserException("DuckDB not initialized. Call initialize() first.")
 
         try:
-            query = f"""
-                COPY {table_name} TO '{output_path}'
-                (HEADER, DELIMITER ',', FORCE_QUOTE *)
-            """
+            start_export = time.time()
+            query = f"COPY {table_name} TO '{output_path}' (HEADER, DELIMITER ',', FORCE_QUOTE *)"
             self.conn.execute(query)
-            logging.info(f"Successfully exported '{table_name}' to CSV")
+            export_duration = time.time() - start_export
+
+            logging.info(f"Table {table_name} written to CSV in {export_duration:.2f} seconds")
 
         except Exception as e:
             raise UserException(f"Failed to export table to CSV: {e}")
@@ -223,8 +182,5 @@ class DuckDBClient:
         if self.conn:
             try:
                 self.conn.close()
-                logging.debug("DuckDB connection closed")
             except Exception as e:
                 logging.warning(f"Error closing DuckDB connection: {e}")
-
-        self._initialized = False

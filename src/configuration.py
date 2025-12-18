@@ -35,17 +35,6 @@ class Configuration(BaseModel):
     duckdb_max_memory_mb: int = 768
     debug: bool = False
 
-    def __init__(self, **data):
-        try:
-            super().__init__(**data)
-        except ValidationError as e:
-            error_messages = [f"{err['loc']}: {err['msg']}" for err in e.errors()]
-            raise UserException(f"Configuration validation error: {', '.join(error_messages)}")
-
-        if self.debug:
-            logging.getLogger().setLevel(logging.DEBUG)
-            logging.debug("Component will run in Debug mode")
-
     @field_validator("sas_tables")
     def validate_sas_tables(cls, v):
         if not v:
