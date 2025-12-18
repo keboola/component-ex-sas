@@ -1,7 +1,4 @@
-import logging
-
-from keboola.component.exceptions import UserException
-from pydantic import BaseModel, Field, ValidationError, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 
 class SftpConnection(BaseModel):
