@@ -26,16 +26,14 @@ class DuckDBClient:
     - Exporting DuckDB tables to CSV
     """
 
-    def __init__(self, max_memory_mb: int, preserve_insertion_order: bool = True):
+    def __init__(self, max_memory_mb: int):
         """
         Initialize DuckDB client.
 
         Args:
             max_memory_mb: Maximum memory allocation in MB
-            preserve_insertion_order: Whether to preserve row order
         """
         self.max_memory_mb = max_memory_mb
-        self.preserve_insertion_order = preserve_insertion_order
         self.conn: duckdb.DuckDBPyConnection | None = None
         self._initialized = False
 
@@ -62,9 +60,8 @@ class DuckDBClient:
             logging.info(f"Initializing DuckDB at {db_path}")
             self.conn = duckdb.connect(database=db_path, config=config)
 
-            # Set insertion order preservation
-            if not self.preserve_insertion_order:
-                self.conn.execute("SET preserve_insertion_order = false;")
+            # Disable insertion order preservation for better performance
+            self.conn.execute("SET preserve_insertion_order = false;")
 
             # Install and load read_stat extension from community repository
             logging.info("Installing DuckDB read_stat extension")

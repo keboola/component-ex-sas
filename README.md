@@ -148,8 +148,7 @@ Use the **"List Files"** button to populate available SAS files from the SFTP se
   },
   "output": {
     "primary_key": ["customer_id"],
-    "incremental": true,
-    "preserve_insertion_order": true
+    "incremental": true
   },
   "duckdb_max_memory_mb": 2048,
   "debug": false

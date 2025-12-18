@@ -31,8 +31,7 @@
       "primary_key": [
         "id"
       ],
-      "incremental": true,
-      "preserve_insertion_order": true
+      "incremental": true
     },
     "duckdb_max_memory_mb": 1024,
     "debug": false

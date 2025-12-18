@@ -27,10 +27,7 @@ class Component(ComponentBase):
 
         # Initialize clients in __init__ for reuse across run() and sync_actions
         self.sftp_client = SftpClient(self.params.sftp)
-        self.duckdb_client = DuckDBClient(
-            max_memory_mb=self.params.duckdb_max_memory_mb,
-            preserve_insertion_order=self.params.output.preserve_insertion_order,
-        )
+        self.duckdb_client = DuckDBClient(max_memory_mb=self.params.duckdb_max_memory_mb)
 
     def run(self):
         """Main execution logic."""

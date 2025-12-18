@@ -24,7 +24,6 @@ class OutputSettings(BaseModel):
 
     primary_key: list[str] | None = Field(default=None, description="List of column names to use as primary key")
     incremental: bool = Field(default=False, description="Write to Keboola Storage in incremental mode")
-    preserve_insertion_order: bool = Field(default=True, description="Preserve the order of rows from source SAS files")
 
 
 class Configuration(BaseModel):

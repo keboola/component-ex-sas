@@ -124,13 +124,6 @@
           "description": "Write to Keboola Storage in incremental mode (append/update)",
           "default": false,
           "propertyOrder": 2
-        },
-        "preserve_insertion_order": {
-          "type": "boolean",
-          "title": "Preserve Insertion Order",
-          "description": "Maintain the order of rows from source SAS files",
-          "default": true,
-          "propertyOrder": 3
         }
       },
       "propertyOrder": 4
