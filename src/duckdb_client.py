@@ -53,6 +53,7 @@ class DuckDBClient:
             # DuckDB configuration
             config = {
                 "temp_directory": DUCKDB_DIR,
+                "extension_directory": os.path.join(DUCKDB_DIR, "extensions"),
                 "max_memory": f"{self.max_memory_mb}MB",
             }
 
