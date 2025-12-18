@@ -89,7 +89,7 @@ class Component(ComponentBase):
         row_count = duckdb_client.load_sas_file(
             sftp_url=sftp_url,
             table_name=table_name,
-            sftp_client=sftp_client.sftp_client,
+            sftp_client=sftp_client,
         )
 
         if row_count == 0:

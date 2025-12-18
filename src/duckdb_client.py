@@ -8,9 +8,10 @@ import os
 from collections import OrderedDict
 
 import duckdb
-import paramiko
 from keboola.component.dao import BaseType, ColumnDefinition, SupportedDataTypes
 from keboola.component.exceptions import UserException
+
+from sftp_client import SftpClient
 
 DUCKDB_DIR = os.path.join(os.environ.get("TMPDIR", "/tmp"), "duckdb")
 
@@ -78,7 +79,7 @@ class DuckDBClient:
         self,
         sftp_url: str,
         table_name: str,
-        sftp_client: paramiko.SFTPClient,
+        sftp_client: SftpClient,
     ) -> int:
         """
         Load SAS file from SFTP into DuckDB table.
@@ -110,20 +111,9 @@ class DuckDBClient:
             # Extract path from sftp:// URL
             remote_path = sftp_url.replace("sftp://", "")
 
-            # Check SFTP client is still connected
-            try:
-                sftp_client.listdir(".")
-            except Exception as e:
-                raise UserException(f"SFTP connection lost before download: {e}")
-
-            # Download file using paramiko SFTP client
-            logging.info(f"Starting download from SFTP to local staging: {remote_path}")
-            try:
-                sftp_client.get(remote_path, temp_file)
-            except PermissionError:
-                raise UserException(f"Permission denied downloading {remote_path}. Check SFTP user permissions.")
-            except Exception as e:
-                raise UserException(f"Failed to download file from SFTP: {e}")
+            # Download file using optimized SftpClient method
+            logging.info(f"Starting optimized download from SFTP: {remote_path}")
+            sftp_client.download_file(remote_path, temp_file)
 
             logging.info(f"File successfully staged to {temp_file}")
 

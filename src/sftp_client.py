@@ -67,6 +67,15 @@ class SftpClient:
             self.sftp_client = self.ssh_client.open_sftp()
             logging.info("SFTP connection established")
 
+            # Optimization for large file transfers
+            transport = self.ssh_client.get_transport()
+            if transport:
+                # Increasing window size can significantly speed up SFTP transfers
+                # by allowing more data "in flight" before an acknowledgment is required.
+                transport.window_size = 2147483647
+                transport.packetizer.REKEY_BYTES = 2147483647
+                transport.packetizer.REKEY_PACKETS = 2147483647
+
             self._connected = True
 
         except paramiko.AuthenticationException as e:
@@ -110,6 +119,37 @@ class SftpClient:
             raise UserException(f"Permission denied accessing: {self.config.folder_path}")
         except Exception as e:
             raise UserException(f"Failed to list files from SFTP: {e}")
+
+    def download_file(self, remote_path: str, local_path: str):
+        """
+        Download a file from SFTP using optimized streaming and prefetching.
+        Much faster than standard sftp.get() for large files.
+
+        Args:
+            remote_path: Path on SFTP server
+            local_path: Destination path on local filesystem
+        """
+        if not self._connected or self.sftp_client is None:
+            raise UserException("Not connected to SFTP server.")
+
+        logging.info(f"Downloading {remote_path} using optimized stream")
+        try:
+            with self.sftp_client.open(remote_path, "rb") as remote_file:
+                # Start prefetching chunks in the background
+                remote_file.prefetch()
+
+                with open(local_path, "wb") as local_file:
+                    # Use a large buffer size for copying
+                    # 1MB chunks are generally efficient for network/disk I/O crossover
+                    buffer_size = 1024 * 1024
+                    while True:
+                        data = remote_file.read(buffer_size)
+                        if not data:
+                            break
+                        local_file.write(data)
+
+        except Exception as e:
+            raise UserException(f"Failed to download file {remote_path}: {e}")
 
     def get_file_metadata(self, filename: str) -> FileMetadata:
         """
