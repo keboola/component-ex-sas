@@ -61,6 +61,7 @@ class SftpClient:
                 username=self.config.username,
                 password=self.config.password,
                 timeout=30,
+                compress=True,
             )
 
             # 2. Open SFTP channel
@@ -69,9 +70,8 @@ class SftpClient:
             # Optimization for large file transfers
             transport = self.ssh_client.get_transport()
             if transport:
-                # Increasing window size can significantly speed up SFTP transfers
-                # 32MB is usually plenty and more stable than max int
-                transport.window_size = 32 * 1024 * 1024
+                # Maximize window size to allow more data in flight
+                transport.window_size = 2147483647
                 transport.packetizer.REKEY_BYTES = 2147483647
                 transport.packetizer.REKEY_PACKETS = 2147483647
 
@@ -131,6 +131,8 @@ class SftpClient:
             raise UserException("Not connected to SFTP server.")
 
         try:
+            attrs = self.sftp_client.stat(remote_path)
+            logging.info(f"Downloading {remote_path} ({attrs.st_size / 1024 / 1024:.2f} MB)")
             self.sftp_client.get(remote_path, local_path)
         except Exception as e:
             raise UserException(f"Failed to download file {remote_path}: {e}")
