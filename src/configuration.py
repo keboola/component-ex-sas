@@ -1,4 +1,5 @@
-from pydantic import BaseModel, Field, field_validator
+from keboola.component.exceptions import UserException
+from pydantic import BaseModel, Field, ValidationError, field_validator
 
 
 class SftpConnection(BaseModel):
@@ -31,6 +32,13 @@ class Configuration(BaseModel):
     output: OutputSettings = Field(default_factory=OutputSettings)
     duckdb_max_memory_mb: int = 768
     debug: bool = False
+
+    def __init__(self, **data):
+        try:
+            super().__init__(**data)
+        except ValidationError as e:
+            error_messages = [f"{err['loc']}: {err['msg']}" for err in e.errors()]
+            raise UserException(f"Configuration validation error: {', '.join(error_messages)}")
 
     @field_validator("sas_tables")
     def validate_sas_tables(cls, v):
