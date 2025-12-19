@@ -27,8 +27,7 @@ class Component(ComponentBase):
 
         self.sftp_client = SftpClient(self.params.sftp)
         self.converter = SasToCsvConverter(
-            max_memory_mb=self.params.duckdb_max_memory_mb,
-            chunk_size=self.params.chunk_size,
+            max_memory_mb=self.params.duckdb_max_memory_mb, batch_size=self.params.batch_size
         )
 
     def run(self):
@@ -76,39 +75,41 @@ class Component(ComponentBase):
         sas_file: str,
     ) -> int:
         """
-        Process a single SAS file: load and convert to CSV for Keboola.
+        Process a single SAS file: stream directly from SAS to CSV for Keboola.
         """
         table_name = self.params.get_table_name(sas_file)
         sftp_url = sftp_client.get_sftp_url(sas_file)
 
-        # Load SAS file
-        row_count = converter.load_sas_file(
+        # Create output table definition first (to get path)
+        out_table = self.create_out_table_definition(
+            f"{table_name}.csv",
+            incremental=self.params.output.incremental,
+            has_header=True,
+        )
+        logging.info(f"Processing {sas_file}")
+
+        # Stream SAS file directly to CSV and get schema
+        row_count, polars_schema = converter.load_sas_file_and_convert_to_csv(
             sftp_url=sftp_url,
             table_name=table_name,
+            output_path=out_table.full_path,
             sftp_client=sftp_client,
         )
+        logging.info(f"Successfully processed {sas_file}")
 
         if row_count == 0:
             return 0
 
-        # Get table schema
-        schema = converter.get_table_schema(table_name)
+        # Convert Polars schema to Keboola schema
+        schema = converter.convert_schema_to_keboola(polars_schema)
 
-        # Create output table definition
-        out_table = self.create_out_table_definition(
-            f"{table_name}.csv",
-            schema=schema,
-            incremental=self.params.output.incremental,
-            has_header=True,
-        )
-
-        # Export to CSV
-        converter.export_to_csv(table_name, out_table.full_path)
+        # Update table definition with schema
+        out_table.schema = schema
 
         # Write manifest
         self.write_manifest(out_table)
 
-        logging.info(f"Successfully exported {row_count:,} rows to '{table_name}.csv'")
+        logging.info(f"Successfully streamed {row_count:,} rows to '{table_name}.csv'")
         return row_count
 
     @sync_action("list_sas_tables")

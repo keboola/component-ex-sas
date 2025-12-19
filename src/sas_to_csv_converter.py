@@ -1,17 +1,18 @@
 """
 Converter for SAS files to CSV format.
-Uses Polars with polars_readstat to read SAS files, then DuckDB to export to CSV.
+Uses pyreadstat with optimized chunked streaming for memory-efficient processing of large files.
 """
 
+import csv
 import logging
 import os
 import time
 from collections import OrderedDict
 
 import duckdb
+import pyreadstat
 from keboola.component.dao import BaseType, ColumnDefinition, SupportedDataTypes
 from keboola.component.exceptions import UserException
-from polars_readstat import scan_readstat
 
 from sftp_client import SftpClient
 
@@ -28,25 +29,25 @@ class SasToCsvConverter:
     - Exporting to CSV using DuckDB
     """
 
-    def __init__(self, max_memory_mb: int, chunk_size: int = 100000):
+    def __init__(self, max_memory_mb: int, batch_size: int = 100000):
         """
         Initialize converter and DuckDB connection.
 
         Args:
             max_memory_mb: Maximum memory allocation in MB
-            chunk_size: Number of rows to process at once
+            batch_size: Number of rows to process at once (default: 100k for optimal performance)
 
         Raises:
             UserException: If initialization fails
         """
         self.max_memory_mb = max_memory_mb
-        self.chunk_size = chunk_size
+        self.batch_size = batch_size
 
         try:
             # Create temp directory
             os.makedirs(TEMP_DIR, exist_ok=True)
 
-            # DuckDB configuration
+            # DuckDB configuration (for schema detection)
             config = {
                 "temp_directory": TEMP_DIR,
                 "max_memory": f"{self.max_memory_mb}MB",
@@ -54,156 +55,205 @@ class SasToCsvConverter:
 
             self.conn = duckdb.connect(config=config)
 
-            # Disable insertion order to prevent OOM
-            self.conn.execute("SET preserve_insertion_order = false;")
-
         except Exception as e:
             raise UserException(f"Failed to initialize converter: {e}")
 
-    def load_sas_file(
+    def load_sas_file_and_convert_to_csv(
         self,
         sftp_url: str,
         table_name: str,
+        output_path: str,
         sftp_client: SftpClient,
-    ) -> int:
+    ) -> tuple[int, dict]:
         """
-        Load SAS file from SFTP into DuckDB table via Polars in chunks.
+        Stream SAS file from SFTP directly to CSV using optimized pyreadstat chunking.
 
-        Downloads file via SFTP, reads with Polars + polars_readstat in chunks using offset/limit.
+        Workflow:
+        1. Download SAS file via SFTP to temp directory
+        2. Detect schema using DuckDB (first 1000 rows)
+        3. Convert SAS to CSV using pyreadstat with optimized chunk processing
 
         Args:
             sftp_url: SFTP URL to SAS file
-            table_name: Name for DuckDB table
+            table_name: Name for the table (used for logging)
+            output_path: Path where CSV should be written (from table definition)
             sftp_client: SftpClient instance
 
         Returns:
-            Number of rows loaded
+            Tuple of (row_count, schema_dict)
 
         Raises:
             UserException: If loading fails
         """
-
         temp_file = os.path.join(TEMP_DIR, f"temp_{table_name}.sas7bdat")
 
         try:
-            logging.info(f"Loading SAS file from {sftp_url} into table '{table_name}'")
+            # Step 1: Download SAS file from SFTP
+            logging.info(f"Downloading SAS file from {sftp_url}")
             remote_path = sftp_url.replace("sftp://", "")
 
             start_dl = time.time()
             sftp_client.download_file(remote_path, temp_file)
-            logging.info(f"File {table_name} downloaded to stage in {time.time() - start_dl:.2f} seconds")
+            logging.info(f"Downloaded in {time.time() - start_dl:.2f} seconds")
 
-            # First, get total row count
-            start_count = time.time()
-            df_lazy = scan_readstat(temp_file)  # noqa: F841
-            total_rows = self.conn.execute("SELECT COUNT(*) FROM df_lazy").fetchone()[0]
-            logging.info(f"Total rows in {table_name}: {total_rows:,} (counted in {time.time() - start_count:.2f}s)")
+            # Step 2: Detect schema using DuckDB (efficient, reads minimal data)
+            logging.info("Detecting schema...")
+            schema_dict = self._detect_schema_with_duckdb(temp_file)
+            logging.info(f"Schema detected: {len(schema_dict)} columns")
 
-            if total_rows == 0:
-                return 0
+            # Step 3: Convert SAS to CSV using optimized pyreadstat
+            start_convert = time.time()
+            total_rows = self._convert_sas_to_csv_optimized(temp_file, output_path)
 
-            # Process in chunks
-            offset = 0
-            chunk_num = 0
-            start_load = time.time()
-
-            while offset < total_rows:
-                chunk_num += 1
-                chunk_start = time.time()
-
-                # Read chunk with offset and limit
-                df_chunk = scan_readstat(temp_file).slice(offset, self.chunk_size).collect()  # noqa: F841
-
-                # Insert into DuckDB
-                if offset == 0:
-                    # Create table on first chunk
-                    self.conn.execute(f"CREATE OR REPLACE TABLE {table_name} AS SELECT * FROM df_chunk")
-                else:
-                    # Append subsequent chunks
-                    self.conn.execute(f"INSERT INTO {table_name} SELECT * FROM df_chunk")
-
-                rows_in_chunk = len(df_chunk)
-                chunk_duration = time.time() - chunk_start
-
-                logging.info(
-                    f"Chunk {chunk_num}: loaded {rows_in_chunk:,} rows (offset {offset:,}) in {chunk_duration:.2f}s"
-                )
-
-                offset += self.chunk_size
-
-            total_duration = time.time() - start_load
+            total_duration = time.time() - start_convert
             logging.info(
-                f"SAS file {table_name} loaded in {chunk_num} chunks "
-                f"({total_rows:,} rows) in {total_duration:.2f} seconds"
+                f"Converted {total_rows:,} rows to CSV in {total_duration:.2f} seconds "
+                f"({total_rows / total_duration:.0f} rows/sec)"
             )
 
-            return total_rows
+            return total_rows, schema_dict
 
         except Exception as e:
-            raise UserException(f"Failed to load SAS file: {e}")
+            raise UserException(f"Failed to process SAS file: {e}")
+        finally:
+            # Clean up temp file
+            if os.path.exists(temp_file):
+                try:
+                    os.remove(temp_file)
+                except Exception as e:
+                    logging.warning(f"Failed to remove temp file: {e}")
 
-    def get_table_schema(self, table_name: str) -> OrderedDict:
+    def _detect_schema_with_duckdb(self, sas_file_path: str) -> dict:
         """
-        Get schema for a DuckDB table, mapped to Keboola types.
+        Detect schema from SAS file using pyreadstat metadata and map to DuckDB types.
 
         Args:
-            table_name: Name of DuckDB table
+            sas_file_path: Path to SAS file
 
         Returns:
-            OrderedDict mapping column names to ColumnDefinition objects
+            Dictionary mapping column names to type strings
         """
-
         try:
-            # Get table metadata
-            table_meta = self.conn.execute(f"DESCRIBE {table_name}").fetchall()
+            # Read first small chunk to get actual data types
+            df, meta = pyreadstat.read_sas7bdat(
+                sas_file_path,
+                row_limit=1000,  # Only read first 1000 rows for schema
+                disable_datetime_conversion=False,  # Keep types for detection
+            )
 
-            schema = OrderedDict()
-            for column in table_meta:
-                col_name = column[0]
-                col_type = column[1]
-
-                schema[col_name] = ColumnDefinition(
-                    data_types=BaseType(dtype=self._convert_duckdb_type(col_type)),
-                    primary_key=False,
-                )
+            # Map pandas dtypes to type strings
+            schema = {}
+            for col_name in df.columns:
+                pandas_dtype = str(df[col_name].dtype)
+                schema[col_name] = pandas_dtype
 
             return schema
 
         except Exception as e:
-            raise UserException(f"Failed to get schema for table {table_name}: {e}")
+            # Ultimate fallback: metadata only
+            logging.warning(f"Schema detection failed, using metadata only: {e}")
+            _, meta = pyreadstat.read_sas7bdat(sas_file_path, metadataonly=True)
 
-    def export_to_csv(self, table_name: str, output_path: str):
+            schema = {}
+            for col_name in meta.column_names:
+                schema[col_name] = "object"  # Default to string
+
+            return schema
+
+    def _convert_sas_to_csv_optimized(self, sas_file_path: str, csv_file_path: str) -> int:
         """
-        Export DuckDB table to CSV file.
+        Convert SAS file to CSV using optimized pyreadstat chunking.
+
+        Optimizations:
+        - Large chunk size (100k rows)
+        - Disable datetime conversion
+        - Large write buffer (8MB)
+        - Batch row writes
+
+        Args:
+            sas_file_path: Path to input SAS file
+            csv_file_path: Path to output CSV file
+
+        Returns:
+            Total number of rows converted
         """
+        logging.info(f"Converting SAS to CSV with chunk size {self.batch_size:,}")
 
-        try:
-            start_export = time.time()
-            query = f"COPY {table_name} TO '{output_path}' (HEADER, DELIMITER ',', FORCE_QUOTE *)"
-            self.conn.execute(query)
-            export_duration = time.time() - start_export
+        # Create iterator for chunked reading
+        reader = pyreadstat.read_file_in_chunks(
+            pyreadstat.read_sas7bdat,
+            sas_file_path,
+            chunksize=self.batch_size,
+            disable_datetime_conversion=True,  # Performance optimization
+        )
 
-            logging.info(f"Table {table_name} written to CSV in {export_duration:.2f} seconds")
+        total_rows = 0
+        chunk_num = 0
 
-        except Exception as e:
-            raise UserException(f"Failed to export table to CSV: {e}")
+        # Open CSV with large buffer for better I/O performance
+        with open(csv_file_path, "w", newline="", encoding="utf-8", buffering=8 * 1024 * 1024) as csvfile:
+            csv_writer = None
+
+            for df, meta in reader:
+                chunk_num += 1
+                chunk_start = time.time()
+
+                # Initialize CSV writer on first chunk
+                if csv_writer is None:
+                    csv_writer = csv.writer(csvfile, quoting=csv.QUOTE_MINIMAL)
+                    # Write header
+                    csv_writer.writerow(df.columns.tolist())
+
+                # Batch write rows (more efficient than row-by-row)
+                csv_writer.writerows(df.itertuples(index=False, name=None))
+
+                rows_in_chunk = len(df)
+                total_rows += rows_in_chunk
+
+                chunk_duration = time.time() - chunk_start
+                logging.info(
+                    f"Chunk {chunk_num}: {rows_in_chunk:,} rows (total: {total_rows:,}) in {chunk_duration:.2f}s"
+                )
+
+        return total_rows
+
+    def convert_schema_to_keboola(self, schema_dict: dict) -> OrderedDict:
+        """
+        Convert schema dictionary to Keboola schema format.
+
+        Args:
+            schema_dict: Schema dictionary (column_name -> type_string)
+
+        Returns:
+            OrderedDict mapping column names to ColumnDefinition objects
+        """
+        schema = OrderedDict()
+        for col_name, type_string in schema_dict.items():
+            schema[col_name] = ColumnDefinition(
+                data_types=BaseType(dtype=self._convert_type_to_keboola(str(type_string))),
+                primary_key=False,
+            )
+
+        return schema
 
     @staticmethod
-    def _convert_duckdb_type(duckdb_type: str) -> SupportedDataTypes:
-        # Normalize type to uppercase
-        dtype = duckdb_type.upper()
+    def _convert_type_to_keboola(type_string: str) -> SupportedDataTypes:
+        """Map pandas/data types to Keboola data types."""
+        dtype = type_string.lower()
 
-        if dtype in ["TINYINT", "SMALLINT", "INTEGER", "BIGINT", "HUGEINT"]:
+        if any(
+            x in dtype for x in ["int", "integer", "tinyint", "smallint", "bigint", "int8", "int16", "int32", "int64"]
+        ):
             return SupportedDataTypes.INTEGER
-        elif dtype in ["REAL", "DECIMAL", "NUMERIC"]:
+        elif any(x in dtype for x in ["decimal", "numeric"]):
             return SupportedDataTypes.NUMERIC
-        elif dtype in ["DOUBLE", "FLOAT"]:
+        elif any(x in dtype for x in ["float", "double", "real", "float32", "float64"]):
             return SupportedDataTypes.FLOAT
-        elif dtype == "BOOLEAN":
+        elif "bool" in dtype:
             return SupportedDataTypes.BOOLEAN
-        elif "TIMESTAMP" in dtype:
+        elif "datetime" in dtype or "timestamp" in dtype:
             return SupportedDataTypes.TIMESTAMP
-        elif dtype == "DATE":
+        elif "date" in dtype:
             return SupportedDataTypes.DATE
         else:
             return SupportedDataTypes.STRING
