@@ -31,6 +31,7 @@ class Configuration(BaseModel):
     sas_tables: list[str]
     output: OutputSettings = Field(default_factory=OutputSettings)
     duckdb_max_memory_mb: int = 768
+    chunk_size: int = Field(default=100000, description="Number of rows to process at once from SAS files")
     debug: bool = False
 
     def __init__(self, **data):

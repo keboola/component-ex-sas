@@ -26,7 +26,10 @@ class Component(ComponentBase):
         self.params = Configuration(**self.configuration.parameters)
 
         self.sftp_client = SftpClient(self.params.sftp)
-        self.converter = SasToCsvConverter(max_memory_mb=self.params.duckdb_max_memory_mb)
+        self.converter = SasToCsvConverter(
+            max_memory_mb=self.params.duckdb_max_memory_mb,
+            chunk_size=self.params.chunk_size,
+        )
 
     def run(self):
         start_time = datetime.now()

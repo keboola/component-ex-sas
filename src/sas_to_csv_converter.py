@@ -28,17 +28,19 @@ class SasToCsvConverter:
     - Exporting to CSV using DuckDB
     """
 
-    def __init__(self, max_memory_mb: int):
+    def __init__(self, max_memory_mb: int, chunk_size: int = 100000):
         """
         Initialize converter and DuckDB connection.
 
         Args:
             max_memory_mb: Maximum memory allocation in MB
+            chunk_size: Number of rows to process at once
 
         Raises:
             UserException: If initialization fails
         """
         self.max_memory_mb = max_memory_mb
+        self.chunk_size = chunk_size
 
         try:
             # Create temp directory
@@ -65,9 +67,9 @@ class SasToCsvConverter:
         sftp_client: SftpClient,
     ) -> int:
         """
-        Load SAS file from SFTP into DuckDB table via Polars.
+        Load SAS file from SFTP into DuckDB table via Polars in chunks.
 
-        Downloads file via SFTP, reads with Polars + polars_readstat, then registers with DuckDB.
+        Downloads file via SFTP, reads with Polars + polars_readstat in chunks using offset/limit.
 
         Args:
             sftp_url: SFTP URL to SAS file
@@ -89,21 +91,53 @@ class SasToCsvConverter:
 
             start_dl = time.time()
             sftp_client.download_file(remote_path, temp_file)
-
             logging.info(f"File {table_name} downloaded to stage in {time.time() - start_dl:.2f} seconds")
-            start_read = time.time()
 
-            # table name is referenced in the query
-            df = scan_readstat(temp_file)  # noqa: F841
+            # First, get total row count
+            start_count = time.time()
+            df_lazy = scan_readstat(temp_file)  # noqa: F841
+            total_rows = self.conn.execute("SELECT COUNT(*) FROM df_lazy").fetchone()[0]
+            logging.info(f"Total rows in {table_name}: {total_rows:,} (counted in {time.time() - start_count:.2f}s)")
 
-            logging.info(f"SAS file {table_name} scanned in {time.time() - start_read:.2f} seconds")
+            if total_rows == 0:
+                return 0
 
-            self.conn.execute(f"CREATE OR REPLACE TABLE {table_name} AS SELECT * FROM df")
+            # Process in chunks
+            offset = 0
+            chunk_num = 0
+            start_load = time.time()
 
-            result = self.conn.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()
-            row_count = result[0] if result else 0
+            while offset < total_rows:
+                chunk_num += 1
+                chunk_start = time.time()
 
-            return row_count
+                # Read chunk with offset and limit
+                df_chunk = scan_readstat(temp_file).slice(offset, self.chunk_size).collect()  # noqa: F841
+
+                # Insert into DuckDB
+                if offset == 0:
+                    # Create table on first chunk
+                    self.conn.execute(f"CREATE OR REPLACE TABLE {table_name} AS SELECT * FROM df_chunk")
+                else:
+                    # Append subsequent chunks
+                    self.conn.execute(f"INSERT INTO {table_name} SELECT * FROM df_chunk")
+
+                rows_in_chunk = len(df_chunk)
+                chunk_duration = time.time() - chunk_start
+
+                logging.info(
+                    f"Chunk {chunk_num}: loaded {rows_in_chunk:,} rows (offset {offset:,}) in {chunk_duration:.2f}s"
+                )
+
+                offset += self.chunk_size
+
+            total_duration = time.time() - start_load
+            logging.info(
+                f"SAS file {table_name} loaded in {chunk_num} chunks "
+                f"({total_rows:,} rows) in {total_duration:.2f} seconds"
+            )
+
+            return total_rows
 
         except Exception as e:
             raise UserException(f"Failed to load SAS file: {e}")
