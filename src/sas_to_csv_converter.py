@@ -94,9 +94,9 @@ class SasToCsvConverter:
             start_read = time.time()
 
             # table name is referenced in the query
-            df = scan_readstat(temp_file).collect()  # noqa: F841
+            df = scan_readstat(temp_file)  # noqa: F841
 
-            logging.info(f"SAS file {table_name} loaded into Polars in {time.time() - start_read:.2f} seconds")
+            logging.info(f"SAS file {table_name} scanned in {time.time() - start_read:.2f} seconds")
 
             self.conn.execute(f"CREATE OR REPLACE TABLE {table_name} AS SELECT * FROM df")
 
