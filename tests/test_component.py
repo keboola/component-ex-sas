@@ -111,77 +111,77 @@ class TestSasToCsvConverter(unittest.TestCase):
     def test_convert_integer_types(self):
         """Test conversion of integer types."""
         self.assertEqual(
-            SasToCsvConverter._convert_duckdb_type("INTEGER"),
+            SasToCsvConverter._convert_type_to_keboola("INTEGER"),
             SupportedDataTypes.INTEGER,
         )
         self.assertEqual(
-            SasToCsvConverter._convert_duckdb_type("BIGINT"),
+            SasToCsvConverter._convert_type_to_keboola("BIGINT"),
             SupportedDataTypes.INTEGER,
         )
         self.assertEqual(
-            SasToCsvConverter._convert_duckdb_type("SMALLINT"),
+            SasToCsvConverter._convert_type_to_keboola("SMALLINT"),
             SupportedDataTypes.INTEGER,
         )
 
     def test_convert_numeric_types(self):
         """Test conversion of numeric/decimal types."""
         self.assertEqual(
-            SasToCsvConverter._convert_duckdb_type("DECIMAL"),
+            SasToCsvConverter._convert_type_to_keboola("DECIMAL"),
             SupportedDataTypes.NUMERIC,
         )
         self.assertEqual(
-            SasToCsvConverter._convert_duckdb_type("NUMERIC"),
+            SasToCsvConverter._convert_type_to_keboola("NUMERIC"),
             SupportedDataTypes.NUMERIC,
         )
 
     def test_convert_float_types(self):
         """Test conversion of float types."""
         self.assertEqual(
-            SasToCsvConverter._convert_duckdb_type("DOUBLE"),
+            SasToCsvConverter._convert_type_to_keboola("DOUBLE"),
             SupportedDataTypes.FLOAT,
         )
         self.assertEqual(
-            SasToCsvConverter._convert_duckdb_type("FLOAT"),
+            SasToCsvConverter._convert_type_to_keboola("FLOAT"),
             SupportedDataTypes.FLOAT,
         )
 
     def test_convert_boolean_type(self):
         """Test conversion of boolean type."""
         self.assertEqual(
-            SasToCsvConverter._convert_duckdb_type("BOOLEAN"),
+            SasToCsvConverter._convert_type_to_keboola("BOOLEAN"),
             SupportedDataTypes.BOOLEAN,
         )
 
     def test_convert_timestamp_types(self):
         """Test conversion of timestamp types."""
         self.assertEqual(
-            SasToCsvConverter._convert_duckdb_type("TIMESTAMP"),
+            SasToCsvConverter._convert_type_to_keboola("TIMESTAMP"),
             SupportedDataTypes.TIMESTAMP,
         )
         self.assertEqual(
-            SasToCsvConverter._convert_duckdb_type("TIMESTAMP WITH TIME ZONE"),
+            SasToCsvConverter._convert_type_to_keboola("TIMESTAMP WITH TIME ZONE"),
             SupportedDataTypes.TIMESTAMP,
         )
 
     def test_convert_date_type(self):
         """Test conversion of date type."""
         self.assertEqual(
-            SasToCsvConverter._convert_duckdb_type("DATE"),
+            SasToCsvConverter._convert_type_to_keboola("DATE"),
             SupportedDataTypes.DATE,
         )
 
     def test_convert_string_types(self):
         """Test conversion of string types."""
         self.assertEqual(
-            SasToCsvConverter._convert_duckdb_type("VARCHAR"),
+            SasToCsvConverter._convert_type_to_keboola("VARCHAR"),
             SupportedDataTypes.STRING,
         )
         self.assertEqual(
-            SasToCsvConverter._convert_duckdb_type("TEXT"),
+            SasToCsvConverter._convert_type_to_keboola("TEXT"),
             SupportedDataTypes.STRING,
         )
         self.assertEqual(
-            SasToCsvConverter._convert_duckdb_type("UNKNOWN_TYPE"),
+            SasToCsvConverter._convert_type_to_keboola("UNKNOWN_TYPE"),
             SupportedDataTypes.STRING,
         )
 
