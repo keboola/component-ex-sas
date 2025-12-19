@@ -1,7 +1,7 @@
 """
 SAS File Extractor Component.
 
-Extracts SAS (.sas7bdat) files from SFTP server using DuckDB and writes to Keboola Storage.
+Extracts SAS (.sas7bdat) files from SFTP server and writes to Keboola Storage as CSV.
 """
 
 import logging
@@ -12,7 +12,7 @@ from keboola.component.exceptions import UserException
 from keboola.component.sync_actions import SelectElement
 
 from configuration import Configuration
-from duckdb_client import DuckDBClient
+from sas_to_csv_converter import SasToCsvConverter
 from sftp_client import SftpClient
 
 
@@ -25,9 +25,8 @@ class Component(ComponentBase):
         super().__init__()
         self.params = Configuration(**self.configuration.parameters)
 
-        # Initialize clients in __init__ for reuse across run() and sync_actions
         self.sftp_client = SftpClient(self.params.sftp)
-        self.duckdb_client = DuckDBClient(max_memory_mb=self.params.duckdb_max_memory_mb)
+        self.converter = SasToCsvConverter(max_memory_mb=self.params.duckdb_max_memory_mb)
 
     def run(self):
         start_time = datetime.now()
@@ -45,7 +44,7 @@ class Component(ComponentBase):
                 # Process the file
                 row_count = self._process_sas_file(
                     sftp_client=self.sftp_client,
-                    duckdb_client=self.duckdb_client,
+                    converter=self.converter,
                     sas_file=sas_file,
                 )
 
@@ -64,23 +63,23 @@ class Component(ComponentBase):
 
         finally:
             # Clean up connections
-            self.duckdb_client.close()
+            self.converter.close()
             self.sftp_client.close()
 
     def _process_sas_file(
         self,
         sftp_client: SftpClient,
-        duckdb_client: DuckDBClient,
+        converter: SasToCsvConverter,
         sas_file: str,
     ) -> int:
         """
-        Process a single SAS file: load to DuckDB view, export to Keboola.
+        Process a single SAS file: load and convert to CSV for Keboola.
         """
         table_name = self.params.get_table_name(sas_file)
         sftp_url = sftp_client.get_sftp_url(sas_file)
 
-        # Load SAS file into DuckDB (creates a view)
-        row_count = duckdb_client.load_sas_file(
+        # Load SAS file
+        row_count = converter.load_sas_file(
             sftp_url=sftp_url,
             table_name=table_name,
             sftp_client=sftp_client,
@@ -90,7 +89,7 @@ class Component(ComponentBase):
             return 0
 
         # Get table schema
-        schema = duckdb_client.get_table_schema(table_name)
+        schema = converter.get_table_schema(table_name)
 
         # Create output table definition
         out_table = self.create_out_table_definition(
@@ -101,7 +100,7 @@ class Component(ComponentBase):
         )
 
         # Export to CSV
-        duckdb_client.export_to_csv(table_name, out_table.full_path)
+        converter.export_to_csv(table_name, out_table.full_path)
 
         # Write manifest
         self.write_manifest(out_table)

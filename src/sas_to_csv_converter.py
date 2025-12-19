@@ -1,6 +1,6 @@
 """
-DuckDB manager for loading SAS files and exporting to CSV.
-Uses DuckDB's read_stat extension to read SAS files from local temp files.
+Converter for SAS files to CSV format.
+Uses Polars with polars_readstat to read SAS files, then DuckDB to export to CSV.
 """
 
 import logging
@@ -11,26 +11,26 @@ from collections import OrderedDict
 import duckdb
 from keboola.component.dao import BaseType, ColumnDefinition, SupportedDataTypes
 from keboola.component.exceptions import UserException
+from polars_readstat import scan_readstat
 
 from sftp_client import SftpClient
 
-DUCKDB_DIR = os.path.join(os.environ.get("TMPDIR", "/tmp"), "duckdb")
+TEMP_DIR = os.path.join(os.environ.get("TMPDIR", "/tmp"), "sas_converter")
 
 
-class DuckDBClient:
+class SasToCsvConverter:
     """
-    DuckDB client for SAS file processing.
+    Converter for SAS files to CSV format.
 
     Handles:
-    - DuckDB initialization with read_stat extension
-    - Loading SAS files from SFTP into DuckDB tables
+    - Loading SAS files from SFTP using Polars + polars_readstat
     - Schema detection and type mapping
-    - Exporting DuckDB tables to CSV
+    - Exporting to CSV using DuckDB
     """
 
     def __init__(self, max_memory_mb: int):
         """
-        Initialize DuckDB client and connection.
+        Initialize converter and DuckDB connection.
 
         Args:
             max_memory_mb: Maximum memory allocation in MB
@@ -42,12 +42,11 @@ class DuckDBClient:
 
         try:
             # Create temp directory
-            os.makedirs(DUCKDB_DIR, exist_ok=True)
+            os.makedirs(TEMP_DIR, exist_ok=True)
 
             # DuckDB configuration
             config = {
-                "temp_directory": DUCKDB_DIR,
-                "extension_directory": os.path.join(DUCKDB_DIR, "extensions"),
+                "temp_directory": TEMP_DIR,
                 "max_memory": f"{self.max_memory_mb}MB",
             }
 
@@ -56,11 +55,8 @@ class DuckDBClient:
             # Disable insertion order to prevent OOM
             self.conn.execute("SET preserve_insertion_order = false;")
 
-            self.conn.execute("INSTALL read_stat FROM community")
-            self.conn.execute("LOAD read_stat")
-
         except Exception as e:
-            raise UserException(f"Failed to initialize DuckDB: {e}")
+            raise UserException(f"Failed to initialize converter: {e}")
 
     def load_sas_file(
         self,
@@ -69,13 +65,13 @@ class DuckDBClient:
         sftp_client: SftpClient,
     ) -> int:
         """
-        Load SAS file from SFTP into DuckDB.
+        Load SAS file from SFTP into DuckDB table via Polars.
 
-        Downloads file via optimized SFTP first, then creates a DuckDB VIEW.
+        Downloads file via SFTP, reads with Polars + polars_readstat, then registers with DuckDB.
 
         Args:
             sftp_url: SFTP URL to SAS file
-            table_name: Name for DuckDB view
+            table_name: Name for DuckDB table
             sftp_client: SftpClient instance
 
         Returns:
@@ -85,24 +81,25 @@ class DuckDBClient:
             UserException: If loading fails
         """
 
-        temp_file = os.path.join(DUCKDB_DIR, f"temp_{table_name}.sas7bdat")
+        temp_file = os.path.join(TEMP_DIR, f"temp_{table_name}.sas7bdat")
 
         try:
-            logging.info(f"Loading SAS file from {sftp_url} into view '{table_name}'")
+            logging.info(f"Loading SAS file from {sftp_url} into table '{table_name}'")
             remote_path = sftp_url.replace("sftp://", "")
 
-            # Time the download
             start_dl = time.time()
             sftp_client.download_file(remote_path, temp_file)
-            dl_duration = time.time() - start_dl
-            logging.info(f"File {table_name} downloaded to stage in {dl_duration:.2f} seconds")
 
-            query = (
-                f"CREATE OR REPLACE VIEW {table_name} AS SELECT * FROM read_stat('{temp_file}', format = 'sas7bdat')"
-            )
-            self.conn.execute(query)
+            logging.info(f"File {table_name} downloaded to stage in {time.time() - start_dl:.2f} seconds")
+            start_read = time.time()
 
-            # Get row count
+            # table name is referenced in the query
+            df = scan_readstat(temp_file).collect()  # noqa: F841
+
+            logging.info(f"SAS file {table_name} loaded into Polars in {time.time() - start_read:.2f} seconds")
+
+            self.conn.execute(f"CREATE OR REPLACE TABLE {table_name} AS SELECT * FROM df")
+
             result = self.conn.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()
             row_count = result[0] if result else 0
 

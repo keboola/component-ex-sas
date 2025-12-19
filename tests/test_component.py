@@ -10,7 +10,7 @@ from keboola.component.dao import SupportedDataTypes
 from keboola.component.exceptions import UserException
 
 from configuration import Configuration, OutputSettings
-from duckdb_client import DuckDBClient
+from sas_to_csv_converter import SasToCsvConverter
 
 
 class TestConfiguration(unittest.TestCase):
@@ -105,83 +105,83 @@ class TestConfiguration(unittest.TestCase):
 # StateManager tests removed - feature was removed from component
 
 
-class TestDuckDBClient(unittest.TestCase):
-    """Test DuckDB type conversion."""
+class TestSasToCsvConverter(unittest.TestCase):
+    """Test SAS to CSV converter type conversion."""
 
     def test_convert_integer_types(self):
         """Test conversion of integer types."""
         self.assertEqual(
-            DuckDBClient._convert_duckdb_type("INTEGER"),
+            SasToCsvConverter._convert_duckdb_type("INTEGER"),
             SupportedDataTypes.INTEGER,
         )
         self.assertEqual(
-            DuckDBClient._convert_duckdb_type("BIGINT"),
+            SasToCsvConverter._convert_duckdb_type("BIGINT"),
             SupportedDataTypes.INTEGER,
         )
         self.assertEqual(
-            DuckDBClient._convert_duckdb_type("SMALLINT"),
+            SasToCsvConverter._convert_duckdb_type("SMALLINT"),
             SupportedDataTypes.INTEGER,
         )
 
     def test_convert_numeric_types(self):
         """Test conversion of numeric/decimal types."""
         self.assertEqual(
-            DuckDBClient._convert_duckdb_type("DECIMAL"),
+            SasToCsvConverter._convert_duckdb_type("DECIMAL"),
             SupportedDataTypes.NUMERIC,
         )
         self.assertEqual(
-            DuckDBClient._convert_duckdb_type("NUMERIC"),
+            SasToCsvConverter._convert_duckdb_type("NUMERIC"),
             SupportedDataTypes.NUMERIC,
         )
 
     def test_convert_float_types(self):
         """Test conversion of float types."""
         self.assertEqual(
-            DuckDBClient._convert_duckdb_type("DOUBLE"),
+            SasToCsvConverter._convert_duckdb_type("DOUBLE"),
             SupportedDataTypes.FLOAT,
         )
         self.assertEqual(
-            DuckDBClient._convert_duckdb_type("FLOAT"),
+            SasToCsvConverter._convert_duckdb_type("FLOAT"),
             SupportedDataTypes.FLOAT,
         )
 
     def test_convert_boolean_type(self):
         """Test conversion of boolean type."""
         self.assertEqual(
-            DuckDBClient._convert_duckdb_type("BOOLEAN"),
+            SasToCsvConverter._convert_duckdb_type("BOOLEAN"),
             SupportedDataTypes.BOOLEAN,
         )
 
     def test_convert_timestamp_types(self):
         """Test conversion of timestamp types."""
         self.assertEqual(
-            DuckDBClient._convert_duckdb_type("TIMESTAMP"),
+            SasToCsvConverter._convert_duckdb_type("TIMESTAMP"),
             SupportedDataTypes.TIMESTAMP,
         )
         self.assertEqual(
-            DuckDBClient._convert_duckdb_type("TIMESTAMP WITH TIME ZONE"),
+            SasToCsvConverter._convert_duckdb_type("TIMESTAMP WITH TIME ZONE"),
             SupportedDataTypes.TIMESTAMP,
         )
 
     def test_convert_date_type(self):
         """Test conversion of date type."""
         self.assertEqual(
-            DuckDBClient._convert_duckdb_type("DATE"),
+            SasToCsvConverter._convert_duckdb_type("DATE"),
             SupportedDataTypes.DATE,
         )
 
     def test_convert_string_types(self):
         """Test conversion of string types."""
         self.assertEqual(
-            DuckDBClient._convert_duckdb_type("VARCHAR"),
+            SasToCsvConverter._convert_duckdb_type("VARCHAR"),
             SupportedDataTypes.STRING,
         )
         self.assertEqual(
-            DuckDBClient._convert_duckdb_type("TEXT"),
+            SasToCsvConverter._convert_duckdb_type("TEXT"),
             SupportedDataTypes.STRING,
         )
         self.assertEqual(
-            DuckDBClient._convert_duckdb_type("UNKNOWN_TYPE"),
+            SasToCsvConverter._convert_duckdb_type("UNKNOWN_TYPE"),
             SupportedDataTypes.STRING,
         )
 
