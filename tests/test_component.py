@@ -26,11 +26,11 @@ class TestConfiguration(unittest.TestCase):
                 "#password": "pass",
                 "folder_path": "/data",
             },
-            sas_tables=["customers.sas7bdat", "orders.sas7bdat"],
+            table="customers.sas7bdat",
         )
 
         self.assertEqual(config.sftp.host, "sftp.example.com")
-        self.assertEqual(len(config.sas_tables), 2)
+        self.assertEqual(config.table, "customers.sas7bdat")
         self.assertIsInstance(config.output, OutputSettings)
 
     def test_missing_required_fields(self):
@@ -44,31 +44,18 @@ class TestConfiguration(unittest.TestCase):
                 }
             )
 
-    def test_invalid_sas_files(self):
-        """Test that non-.sas7bdat files are rejected."""
-        with self.assertRaises(UserException):
-            Configuration(
-                sftp={
-                    "host": "sftp.example.com",
-                    "username": "user",
-                    "#password": "pass",
-                    "folder_path": "/data",
-                },
-                sas_tables=["customers.csv"],  # Invalid extension
-            )
-
-    def test_empty_sas_files_list(self):
-        """Test that empty sas_files list is rejected."""
-        with self.assertRaises(UserException):
-            Configuration(
-                sftp={
-                    "host": "sftp.example.com",
-                    "username": "user",
-                    "#password": "pass",
-                    "folder_path": "/data",
-                },
-                sas_tables=[],  # Empty list
-            )
+    def test_optional_table(self):
+        """Test that table parameter is optional (for sync actions)."""
+        config = Configuration(
+            sftp={
+                "host": "sftp.example.com",
+                "username": "user",
+                "#password": "pass",
+                "folder_path": "/data",
+            },
+            table=None,
+        )
+        self.assertIsNone(config.table)
 
     # Incremental settings feature removed - test removed
 
@@ -81,7 +68,7 @@ class TestConfiguration(unittest.TestCase):
                 "#password": "pass",
                 "folder_path": "/data/sas/",  # Has trailing slash
             },
-            sas_tables=["customers.sas7bdat"],
+            table="customers.sas7bdat",
         )
 
         self.assertEqual(config.sftp.folder_path, "/data/sas")
@@ -95,7 +82,7 @@ class TestConfiguration(unittest.TestCase):
                 "#password": "pass",
                 "folder_path": "/data",
             },
-            sas_tables=["customers.sas7bdat"],
+            table="customers.sas7bdat",
         )
 
         self.assertEqual(config.get_table_name("customers.sas7bdat"), "customers")

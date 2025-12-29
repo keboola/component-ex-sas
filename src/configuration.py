@@ -28,7 +28,7 @@ class Configuration(BaseModel):
     """Main component configuration."""
 
     sftp: SftpConnection
-    sas_tables: list[str]
+    table: str | None = Field(default=None, description="SAS table file to extract")
     output: OutputSettings = Field(default_factory=OutputSettings)
     duckdb_max_memory_mb: int = 768
     batch_size: int = Field(
@@ -42,18 +42,6 @@ class Configuration(BaseModel):
         except ValidationError as e:
             error_messages = [f"{err['loc']}: {err['msg']}" for err in e.errors()]
             raise UserException(f"Configuration validation error: {', '.join(error_messages)}")
-
-    @field_validator("sas_tables")
-    def validate_sas_tables(cls, v):
-        if not v:
-            raise ValueError("At least one SAS file must be specified")
-
-        # Validate all files have .sas7bdat extension
-        invalid_files = [f for f in v if not f.endswith(".sas7bdat")]
-        if invalid_files:
-            raise ValueError(f"All files must have .sas7bdat extension. Invalid files: {invalid_files}")
-
-        return v
 
     def get_table_name(self, sas_filename: str) -> str:
         """

@@ -36,32 +36,26 @@ class Component(ComponentBase):
         try:
             self.sftp_client.connect()
 
-            # Process each configured SAS file
-            files_processed = 0
-            total_rows = 0
+            # Check if table is specified
+            if not self.params.table:
+                raise UserException("No table specified. Please select a table to extract.")
 
-            for sas_file in self.params.sas_tables:
-                logging.info(f"Processing file: {sas_file}")
+            sas_file = self.params.table
+            logging.info(f"Processing file: {sas_file}")
 
-                # Process the file
-                row_count = self._process_sas_file(
-                    sftp_client=self.sftp_client,
-                    converter=self.converter,
-                    sas_file=sas_file,
-                )
-
-                if row_count > 0:
-                    files_processed += 1
-                    total_rows += row_count
-                else:
-                    logging.info(f"No data in {sas_file}")
+            # Process the file
+            row_count = self._process_sas_file(
+                sftp_client=self.sftp_client,
+                converter=self.converter,
+                sas_file=sas_file,
+            )
 
             # Summary
             duration = (datetime.now() - start_time).total_seconds()
-            logging.info(
-                f"Extraction complete: {files_processed} files processed, "
-                f"{total_rows:,} total rows extracted in {duration:.2f} seconds"
-            )
+            if row_count > 0:
+                logging.info(f"Extraction complete: {row_count:,} rows extracted in {duration:.2f} seconds")
+            else:
+                logging.info(f"No data found in {sas_file}")
 
         finally:
             # Clean up connections
@@ -126,6 +120,16 @@ class Component(ComponentBase):
 
         except Exception as e:
             raise UserException(f"Failed to list SAS files: {e}")
+
+    @sync_action("testConnection")
+    def test_connection(self):
+        """Sync action to test SFTP connection."""
+        try:
+            self.sftp_client.connect()
+        except Exception as e:
+            raise UserException(f"Connection test failed: {str(e)}")
+        finally:
+            self.sftp_client.close()
 
 
 if __name__ == "__main__":

@@ -7,6 +7,7 @@
   "properties": {
     "sftp": {
       "type": "object",
+      "title": "Authentication",
       "required": [
         "host",
         "username",
@@ -54,6 +55,11 @@
         }
       },
       "propertyOrder": 1
+    },
+    "test_connection": {
+      "type": "button",
+      "format": "test-connection",
+      "propertyOrder": 2
     }
   }
 }

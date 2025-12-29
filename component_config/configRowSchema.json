@@ -1,26 +1,19 @@
 {
   "type": "object",
-  "title": "SAS File Extractor Configuration",
-  "required": [
-    "sas_tables"
-  ],
+  "title": "Configuration",
+  "required": [],
   "properties": {
-    "sas_tables": {
+    "table": {
       "enum": [],
       "type": "string",
-      "items": {
-        "enum": [],
-        "type": "string"
-      },
       "title": "Table to extract",
+      "description": "Select a SAS table to extract",
       "options": {
-        "tags": true,
         "async": {
           "label": "Re-load tables",
           "action": "list_sas_tables"
         }
       },
-      "uniqueItems": true,
       "propertyOrder": 2
     },
     "incremental": {
