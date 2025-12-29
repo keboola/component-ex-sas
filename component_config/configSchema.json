@@ -1,14 +1,12 @@
 {
   "type": "object",
-  "title": "SAS File Extractor Configuration",
+  "title": "Authentication",
   "required": [
-    "sftp",
-    "sas_files"
+    "sftp"
   ],
   "properties": {
     "sftp": {
       "type": "object",
-      "title": "SFTP Connection",
       "required": [
         "host",
         "username",
@@ -56,93 +54,6 @@
         }
       },
       "propertyOrder": 1
-    },
-    "sas_tables": {
-      "type": "array",
-      "items": {
-        "enum": [],
-        "type": "string"
-      },
-      "title": "Tables to extract",
-      "format": "select",
-      "options": {
-        "tags": true,
-        "async": {
-          "label": "Re-load tables",
-          "action": "list_sas_tables"
-        }
-      },
-      "uniqueItems": true,
-      "propertyOrder": 2
-    },
-    "incremental": {
-      "type": "object",
-      "title": "Incremental Loading",
-      "description": "Configure incremental data loading behavior",
-      "properties": {
-        "file_level_incremental": {
-          "type": "boolean",
-          "title": "File-Level Incremental",
-          "description": "Only process new or modified files based on last modification timestamp",
-          "default": true,
-          "propertyOrder": 1
-        },
-        "data_level_incremental": {
-          "type": "boolean",
-          "title": "Data-Level Incremental",
-          "description": "Within each file, only load rows with timestamps newer than last processing",
-          "default": false,
-          "propertyOrder": 2
-        },
-        "timestamp_column": {
-          "type": "string",
-          "title": "Timestamp Column",
-          "description": "Column name containing timestamps for data-level incremental (required when Data-Level Incremental is enabled)",
-          "propertyOrder": 3
-        }
-      },
-      "propertyOrder": 3
-    },
-    "output": {
-      "type": "object",
-      "title": "Output Settings",
-      "description": "Configure how data is written to Keboola Storage",
-      "properties": {
-        "primary_key": {
-          "type": "array",
-          "title": "Primary Key",
-          "description": "Column(s) to use as primary key in Keboola Storage",
-          "items": {
-            "type": "string"
-          },
-          "uniqueItems": true,
-          "propertyOrder": 1
-        },
-        "incremental": {
-          "type": "boolean",
-          "title": "Incremental Write",
-          "description": "Write to Keboola Storage in incremental mode (append/update)",
-          "default": false,
-          "propertyOrder": 2
-        }
-      },
-      "propertyOrder": 4
-    },
-    "duckdb_max_memory_mb": {
-      "type": "integer",
-      "title": "DuckDB Maximum Memory (MB)",
-      "description": "Maximum memory allocation for DuckDB processing",
-      "default": 1024,
-      "minimum": 128,
-      "maximum": 16384,
-      "propertyOrder": 5
-    },
-    "debug": {
-      "type": "boolean",
-      "title": "Debug Mode",
-      "description": "Enable detailed debug logging",
-      "default": false,
-      "propertyOrder": 6
     }
   }
 }
