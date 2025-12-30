@@ -1,9 +1,8 @@
 """
 Converter for SAS files to CSV format.
-Uses pyreadstat with optimized chunked streaming for memory-efficient processing of large files.
+Uses pyreadstat with Polars output for memory-efficient processing of large files.
 """
 
-import csv
 import logging
 import os
 import time
@@ -58,32 +57,29 @@ class SasToCsvConverter:
         except Exception as e:
             raise UserException(f"Failed to initialize converter: {e}")
 
-    def load_sas_file_and_convert_to_csv(
+    def infer_sas_schema(
         self,
         sftp_url: str,
         table_name: str,
-        output_path: str,
         sftp_client: SftpClient,
-    ) -> tuple[int, dict]:
+    ) -> tuple[str, dict]:
         """
-        Stream SAS file from SFTP directly to CSV using optimized pyreadstat chunking.
+        Download SAS file from SFTP and infer its schema.
 
         Workflow:
         1. Download SAS file via SFTP to temp directory
         2. Detect schema using DuckDB (first 1000 rows)
-        3. Convert SAS to CSV using pyreadstat with optimized chunk processing
 
         Args:
             sftp_url: SFTP URL to SAS file
             table_name: Name for the table (used for logging)
-            output_path: Path where CSV should be written (from table definition)
             sftp_client: SftpClient instance
 
         Returns:
-            Tuple of (row_count, schema_dict)
+            Tuple of (temp_file_path, schema_dict)
 
         Raises:
-            UserException: If loading fails
+            UserException: If download or schema detection fails
         """
         temp_file = os.path.join(TEMP_DIR, f"temp_{table_name}.sas7bdat")
 
@@ -101,7 +97,37 @@ class SasToCsvConverter:
             schema_dict = self._detect_schema_with_duckdb(temp_file)
             logging.info(f"Schema detected: {len(schema_dict)} columns")
 
-            # Step 3: Convert SAS to CSV using optimized pyreadstat
+            return temp_file, schema_dict
+
+        except Exception as e:
+            # Clean up temp file on error
+            if os.path.exists(temp_file):
+                try:
+                    os.remove(temp_file)
+                except Exception as cleanup_error:
+                    logging.warning(f"Failed to remove temp file: {cleanup_error}")
+            raise UserException(f"Failed to infer schema from SAS file: {e}")
+
+    def convert_sas_to_csv(
+        self,
+        temp_file: str,
+        output_path: str,
+    ) -> int:
+        """
+        Convert already downloaded SAS file to CSV using optimized pyreadstat chunking.
+
+        Args:
+            temp_file: Path to temporary SAS file (from infer_sas_schema)
+            output_path: Path where CSV should be written (from table definition)
+
+        Returns:
+            Total number of rows converted
+
+        Raises:
+            UserException: If conversion fails
+        """
+        try:
+            # Convert SAS to CSV using optimized pyreadstat
             start_convert = time.time()
             total_rows = self._convert_sas_to_csv_optimized(temp_file, output_path)
 
@@ -111,10 +137,10 @@ class SasToCsvConverter:
                 f"({total_rows / total_duration:.0f} rows/sec)"
             )
 
-            return total_rows, schema_dict
+            return total_rows
 
         except Exception as e:
-            raise UserException(f"Failed to process SAS file: {e}")
+            raise UserException(f"Failed to convert SAS file to CSV: {e}")
         finally:
             # Clean up temp file
             if os.path.exists(temp_file):
@@ -125,7 +151,7 @@ class SasToCsvConverter:
 
     def _detect_schema_with_duckdb(self, sas_file_path: str) -> dict:
         """
-        Detect schema from SAS file using pyreadstat metadata and map to DuckDB types.
+        Detect schema from SAS file using pyreadstat with Polars output.
 
         Args:
             sas_file_path: Path to SAS file
@@ -134,18 +160,19 @@ class SasToCsvConverter:
             Dictionary mapping column names to type strings
         """
         try:
-            # Read first small chunk to get actual data types
+            # Read first small chunk to get actual data types using Polars
             df, meta = pyreadstat.read_sas7bdat(
                 sas_file_path,
                 row_limit=1000,  # Only read first 1000 rows for schema
                 disable_datetime_conversion=False,  # Keep types for detection
+                output_format="polars",
             )
 
-            # Map pandas dtypes to type strings
+            # Map Polars dtypes to type strings
             schema = {}
             for col_name in df.columns:
-                pandas_dtype = str(df[col_name].dtype)
-                schema[col_name] = pandas_dtype
+                polars_dtype = str(df[col_name].dtype)
+                schema[col_name] = polars_dtype
 
             return schema
 
@@ -162,13 +189,13 @@ class SasToCsvConverter:
 
     def _convert_sas_to_csv_optimized(self, sas_file_path: str, csv_file_path: str) -> int:
         """
-        Convert SAS file to CSV using optimized pyreadstat chunking.
+        Convert SAS file to CSV using Polars output from pyreadstat.
 
         Optimizations:
+        - Direct Polars output from pyreadstat
+        - Polars native write_csv for fast I/O
         - Large chunk size (100k rows)
         - Disable datetime conversion
-        - Large write buffer (8MB)
-        - Batch row writes
 
         Args:
             sas_file_path: Path to input SAS file
@@ -179,41 +206,38 @@ class SasToCsvConverter:
         """
         logging.info(f"Converting SAS to CSV with chunk size {self.batch_size:,}")
 
-        # Create iterator for chunked reading
+        # Create iterator for chunked reading with Polars output
         reader = pyreadstat.read_file_in_chunks(
             pyreadstat.read_sas7bdat,
             sas_file_path,
             chunksize=self.batch_size,
             disable_datetime_conversion=True,  # Performance optimization
+            output_format="polars",
         )
 
         total_rows = 0
         chunk_num = 0
+        first_chunk = True
 
-        # Open CSV with large buffer for better I/O performance
-        with open(csv_file_path, "w", newline="", encoding="utf-8", buffering=8 * 1024 * 1024) as csvfile:
-            csv_writer = None
+        for df, meta in reader:
+            chunk_num += 1
+            chunk_start = time.time()
 
-            for df, meta in reader:
-                chunk_num += 1
-                chunk_start = time.time()
+            # Write using Polars native CSV writer
+            if first_chunk:
+                # First chunk: write with header
+                df.write_csv(csv_file_path, include_header=True)
+                first_chunk = False
+            else:
+                # Append subsequent chunks without header
+                with open(csv_file_path, "ab") as f:
+                    df.write_csv(f, include_header=False)
 
-                # Initialize CSV writer on first chunk
-                if csv_writer is None:
-                    csv_writer = csv.writer(csvfile, quoting=csv.QUOTE_MINIMAL)
-                    # Write header
-                    csv_writer.writerow(df.columns.tolist())
+            rows_in_chunk = df.height
+            total_rows += rows_in_chunk
 
-                # Batch write rows (more efficient than row-by-row)
-                csv_writer.writerows(df.itertuples(index=False, name=None))
-
-                rows_in_chunk = len(df)
-                total_rows += rows_in_chunk
-
-                chunk_duration = time.time() - chunk_start
-                logging.info(
-                    f"Chunk {chunk_num}: {rows_in_chunk:,} rows (total: {total_rows:,}) in {chunk_duration:.2f}s"
-                )
+            chunk_duration = time.time() - chunk_start
+            logging.info(f"Chunk {chunk_num}: {rows_in_chunk:,} rows (total: {total_rows:,}) in {chunk_duration:.2f}s")
 
         return total_rows
 

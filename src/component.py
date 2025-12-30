@@ -15,6 +15,10 @@ from configuration import Configuration
 from sas_to_csv_converter import SasToCsvConverter
 from sftp_client import SftpClient
 
+import os
+
+os.environ["KBC_DATA_TYPE_SUPPORT"] = "authoritative"
+
 
 class Component(ComponentBase):
     """
@@ -69,38 +73,43 @@ class Component(ComponentBase):
         sas_file: str,
     ) -> int:
         """
-        Process a single SAS file: stream directly from SAS to CSV for Keboola.
+        Process a single SAS file: infer schema first, then create table definition and write CSV.
         """
         table_name = self.params.get_table_name(sas_file)
         sftp_url = sftp_client.get_sftp_url(sas_file)
 
-        # Create output table definition first (to get path)
+        logging.info(f"Processing {sas_file}")
+
+        # Step 1: Infer schema from SAS file (downloads and analyzes structure)
+        temp_file, schema_dict = converter.infer_sas_schema(
+            sftp_url=sftp_url,
+            table_name=table_name,
+            sftp_client=sftp_client,
+        )
+
+        # Step 2: Convert schema to Keboola format
+        keboola_schema = converter.convert_schema_to_keboola(schema_dict)
+        logging.debug(f"Converted schema: {keboola_schema}")
+
+        # Step 3: Create output table definition WITH schema
         out_table = self.create_out_table_definition(
             f"{table_name}.csv",
             incremental=self.params.output.incremental,
             has_header=True,
+            schema=keboola_schema,
         )
-        logging.info(f"Processing {sas_file}")
 
-        # Stream SAS file directly to CSV and get schema
-        row_count, polars_schema = converter.load_sas_file_and_convert_to_csv(
-            sftp_url=sftp_url,
-            table_name=table_name,
+        # Step 4: Convert SAS to CSV (uses already downloaded temp file)
+        row_count = converter.convert_sas_to_csv(
+            temp_file=temp_file,
             output_path=out_table.full_path,
-            sftp_client=sftp_client,
         )
         logging.info(f"Successfully processed {sas_file}")
 
         if row_count == 0:
             return 0
 
-        # Convert Polars schema to Keboola schema
-        schema = converter.convert_schema_to_keboola(polars_schema)
-
-        # Update table definition with schema
-        out_table.schema = schema
-
-        # Write manifest
+        # Step 5: Write manifest
         self.write_manifest(out_table)
 
         logging.info(f"Successfully streamed {row_count:,} rows to '{table_name}.csv'")
