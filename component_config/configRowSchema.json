@@ -39,6 +39,10 @@
           "items": {
             "type": "string"
           },
+          "format": "select",
+          "options": {
+            "tags": true
+          },
           "uniqueItems": true,
           "propertyOrder": 2
         }
