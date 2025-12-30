@@ -9,7 +9,7 @@ from unittest import mock
 from keboola.component.dao import SupportedDataTypes
 from keboola.component.exceptions import UserException
 
-from configuration import Configuration, OutputSettings
+from configuration import Configuration, Destination
 from sas_to_csv_converter import SasToCsvConverter
 
 
@@ -31,7 +31,7 @@ class TestConfiguration(unittest.TestCase):
 
         self.assertEqual(config.sftp.host, "sftp.example.com")
         self.assertEqual(config.table, "customers.sas7bdat")
-        self.assertIsInstance(config.output, OutputSettings)
+        self.assertIsInstance(config.destination, Destination)
 
     def test_missing_required_fields(self):
         """Test that missing required fields raise UserException."""

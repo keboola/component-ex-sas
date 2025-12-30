@@ -14,41 +14,24 @@
           "action": "list_sas_tables"
         }
       },
-      "propertyOrder": 2
+      "propertyOrder": 1
     },
-    "incremental": {
+    "destination": {
       "type": "object",
-      "title": "Incremental Loading",
-      "description": "Configure incremental data loading behavior",
+      "title": "Destination",
+      "description": "Configure output table destination settings",
       "properties": {
-        "file_level_incremental": {
-          "type": "boolean",
-          "title": "File-Level Incremental",
-          "description": "Only process new or modified files based on last modification timestamp",
-          "default": true,
+        "load_type": {
+          "type": "string",
+          "title": "Load Type",
+          "description": "Type of load: full load or incremental load",
+          "enum": [
+            "full_load",
+            "incremental_load"
+          ],
+          "default": "full_load",
           "propertyOrder": 1
         },
-        "data_level_incremental": {
-          "type": "boolean",
-          "title": "Data-Level Incremental",
-          "description": "Within each file, only load rows with timestamps newer than last processing",
-          "default": false,
-          "propertyOrder": 2
-        },
-        "timestamp_column": {
-          "type": "string",
-          "title": "Timestamp Column",
-          "description": "Column name containing timestamps for data-level incremental (required when Data-Level Incremental is enabled)",
-          "propertyOrder": 3
-        }
-      },
-      "propertyOrder": 3
-    },
-    "output": {
-      "type": "object",
-      "title": "Output Settings",
-      "description": "Configure how data is written to Keboola Storage",
-      "properties": {
         "primary_key": {
           "type": "array",
           "title": "Primary Key",
@@ -57,25 +40,31 @@
             "type": "string"
           },
           "uniqueItems": true,
-          "propertyOrder": 1
-        },
-        "incremental": {
-          "type": "boolean",
-          "title": "Incremental Write",
-          "description": "Write to Keboola Storage in incremental mode (append/update)",
-          "default": false,
           "propertyOrder": 2
         }
       },
-      "propertyOrder": 4
+      "propertyOrder": 2
+    },
+    "incremental_column": {
+      "type": "string",
+      "title": "Incremental Column",
+      "description": "Column name for incremental extraction (timestamp or numeric). Only extracts rows greater than last run value.",
+      "propertyOrder": 3
     },
     "duckdb_max_memory_mb": {
       "type": "integer",
       "title": "DuckDB Maximum Memory (MB)",
       "description": "Maximum memory allocation for DuckDB processing",
-      "default": 1024,
+      "default": 768,
       "minimum": 128,
       "maximum": 16384,
+      "propertyOrder": 4
+    },
+    "batch_size": {
+      "type": "integer",
+      "title": "Batch Size",
+      "description": "Number of rows to process at once (lower = less memory, slower)",
+      "default": 10000,
       "propertyOrder": 5
     },
     "debug": {

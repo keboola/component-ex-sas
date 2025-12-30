@@ -112,6 +112,8 @@ class SasToCsvConverter:
         self,
         temp_file: str,
         output_path: str,
+        incremental_field: str | None = None,
+        last_incremental_value: float | int | None = None,
     ) -> int:
         """
         Convert already downloaded SAS file to CSV using optimized pyreadstat chunking.
@@ -119,6 +121,8 @@ class SasToCsvConverter:
         Args:
             temp_file: Path to temporary SAS file (from infer_sas_schema)
             output_path: Path where CSV should be written (from table definition)
+            incremental_field: Column name for incremental filtering (optional)
+            last_incremental_value: Last incremental value to filter from (optional)
 
         Returns:
             Total number of rows converted
@@ -129,7 +133,9 @@ class SasToCsvConverter:
         try:
             # Convert SAS to CSV using optimized pyreadstat
             start_convert = time.time()
-            total_rows = self._convert_sas_to_csv_optimized(temp_file, output_path)
+            total_rows = self._convert_sas_to_csv_optimized(
+                temp_file, output_path, incremental_field, last_incremental_value
+            )
 
             total_duration = time.time() - start_convert
             logging.info(
@@ -187,7 +193,13 @@ class SasToCsvConverter:
 
             return schema
 
-    def _convert_sas_to_csv_optimized(self, sas_file_path: str, csv_file_path: str) -> int:
+    def _convert_sas_to_csv_optimized(
+        self,
+        sas_file_path: str,
+        csv_file_path: str,
+        incremental_field: str | None = None,
+        last_incremental_value: float | int | None = None,
+    ) -> int:
         """
         Convert SAS file to CSV using Polars output from pyreadstat.
 
@@ -200,11 +212,16 @@ class SasToCsvConverter:
         Args:
             sas_file_path: Path to input SAS file
             csv_file_path: Path to output CSV file
+            incremental_field: Column name for incremental filtering (optional)
+            last_incremental_value: Last incremental value to filter from (optional)
 
         Returns:
             Total number of rows converted
         """
         logging.info(f"Converting SAS to CSV with chunk size {self.batch_size:,}")
+
+        if incremental_field and last_incremental_value is not None:
+            logging.info(f"Incremental mode: filtering {incremental_field} > {last_incremental_value}")
 
         # Create iterator for chunked reading with Polars output
         reader = pyreadstat.read_file_in_chunks(
@@ -222,6 +239,19 @@ class SasToCsvConverter:
         for df, meta in reader:
             chunk_num += 1
             chunk_start = time.time()
+
+            # Apply incremental filter if specified
+            if incremental_field and last_incremental_value is not None:
+                if incremental_field in df.columns:
+                    import polars as pl
+
+                    df = df.filter(pl.col(incremental_field) > last_incremental_value)
+                else:
+                    logging.warning(f"Incremental field '{incremental_field}' not found in data, skipping filter")
+
+            # Skip empty chunks after filtering
+            if df.height == 0:
+                continue
 
             # Write using Polars native CSV writer
             if first_chunk:

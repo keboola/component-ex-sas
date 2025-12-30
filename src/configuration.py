@@ -1,5 +1,12 @@
+from enum import Enum
+
 from keboola.component.exceptions import UserException
-from pydantic import BaseModel, Field, ValidationError, field_validator
+from pydantic import BaseModel, Field, ValidationError, computed_field, field_validator
+
+
+class LoadType(str, Enum):
+    full_load = "full_load"
+    incremental_load = "incremental_load"
 
 
 class SftpConnection(BaseModel):
@@ -17,11 +24,14 @@ class SftpConnection(BaseModel):
         return v.rstrip("/")
 
 
-class OutputSettings(BaseModel):
-    """Output table configuration."""
-
+class Destination(BaseModel):
+    load_type: LoadType = Field(default=LoadType.full_load, description="Type of load: full or incremental")
     primary_key: list[str] | None = Field(default=None, description="List of column names to use as primary key")
-    incremental: bool = Field(default=False, description="Write to Keboola Storage in incremental mode")
+
+    @computed_field
+    @property
+    def incremental(self) -> bool:
+        return self.load_type == LoadType.incremental_load
 
 
 class Configuration(BaseModel):
@@ -29,7 +39,10 @@ class Configuration(BaseModel):
 
     sftp: SftpConnection
     table: str | None = Field(default=None, description="SAS table file to extract")
-    output: OutputSettings = Field(default_factory=OutputSettings)
+    destination: Destination = Field(default_factory=Destination)
+    incremental_column: str | None = Field(
+        default=None, description="Column name for incremental extraction (timestamp or numeric)"
+    )
     duckdb_max_memory_mb: int = 768
     batch_size: int = Field(
         default=10000, description="Number of rows to process at once (lower = less memory, slower)"

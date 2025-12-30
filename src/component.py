@@ -34,6 +34,17 @@ class Component(ComponentBase):
             max_memory_mb=self.params.duckdb_max_memory_mb, batch_size=self.params.batch_size
         )
 
+        # Store start time for incremental state
+        self._start_time = datetime.now()
+
+        # Load last incremental value from state file
+        self._last_incremental_value = 0  # Default to Unix timestamp 0
+        if self.params.incremental_column:
+            state = self.get_state_file()
+            if state:
+                self._last_incremental_value = state.get("last_incremental_value", 0)
+                logging.info(f"Loaded last incremental value: {self._last_incremental_value}")
+
     def run(self):
         start_time = datetime.now()
 
@@ -60,6 +71,12 @@ class Component(ComponentBase):
                 logging.info(f"Extraction complete: {row_count:,} rows extracted in {duration:.2f} seconds")
             else:
                 logging.info(f"No data found in {sas_file}")
+
+            # Save state if incremental column is specified
+            if self.params.incremental_column:
+                state = {"last_incremental_value": self._start_time.timestamp()}
+                self.write_state_file(state)
+                logging.info(f"Saved state: last_incremental_value = {self._start_time.timestamp()}")
 
         finally:
             # Clean up connections
@@ -94,7 +111,7 @@ class Component(ComponentBase):
         # Step 3: Create output table definition WITH schema
         out_table = self.create_out_table_definition(
             f"{table_name}.csv",
-            incremental=self.params.output.incremental,
+            incremental=self.params.destination.incremental,
             has_header=True,
             schema=keboola_schema,
         )
@@ -103,6 +120,8 @@ class Component(ComponentBase):
         row_count = converter.convert_sas_to_csv(
             temp_file=temp_file,
             output_path=out_table.full_path,
+            incremental_field=self.params.incremental_column,
+            last_incremental_value=self._last_incremental_value if self.params.incremental_column else None,
         )
         logging.info(f"Successfully processed {sas_file}")
 
