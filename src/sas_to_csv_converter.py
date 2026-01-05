@@ -7,8 +7,10 @@ import logging
 import os
 import time
 from collections import OrderedDict
+from datetime import datetime
 
 import duckdb
+import polars as pl
 import pyreadstat
 from keboola.component.dao import BaseType, ColumnDefinition, SupportedDataTypes
 from keboola.component.exceptions import UserException
@@ -243,9 +245,6 @@ class SasToCsvConverter:
             # Apply incremental filter if specified
             if incremental_field and last_incremental_value is not None:
                 if incremental_field in df.columns:
-                    import polars as pl
-                    from datetime import datetime
-
                     # Convert Unix timestamp to datetime for proper comparison with SAS datetime columns
                     # This handles the case where SAS datetimes are converted to datetime objects
                     last_value_dt = datetime.fromtimestamp(last_incremental_value)
@@ -256,8 +255,7 @@ class SasToCsvConverter:
                     except Exception:
                         # Fallback: if datetime comparison fails, try numeric comparison
                         logging.warning(
-                            f"Datetime comparison failed for '{incremental_field}', "
-                            f"trying numeric comparison"
+                            f"Datetime comparison failed for '{incremental_field}', trying numeric comparison"
                         )
                         df = df.filter(pl.col(incremental_field) > last_incremental_value)
                 else:
