@@ -170,7 +170,7 @@ class SasToCsvConverter:
             df, meta = pyreadstat.read_sas7bdat(
                 sas_file_path,
                 row_limit=1000,  # Only read first 1000 rows for schema
-                disable_datetime_conversion=False,  # Keep types for detection
+                disable_datetime_conversion=False,
                 output_format="polars",
             )
 
@@ -207,7 +207,7 @@ class SasToCsvConverter:
         - Direct Polars output from pyreadstat
         - Polars native write_csv for fast I/O
         - Large chunk size (100k rows)
-        - Disable datetime conversion
+        - Automatic datetime conversion for proper date formatting
 
         Args:
             sas_file_path: Path to input SAS file
@@ -228,7 +228,7 @@ class SasToCsvConverter:
             pyreadstat.read_sas7bdat,
             sas_file_path,
             chunksize=self.batch_size,
-            disable_datetime_conversion=True,  # Performance optimization
+            disable_datetime_conversion=False,
             output_format="polars",
         )
 
@@ -244,8 +244,22 @@ class SasToCsvConverter:
             if incremental_field and last_incremental_value is not None:
                 if incremental_field in df.columns:
                     import polars as pl
+                    from datetime import datetime
 
-                    df = df.filter(pl.col(incremental_field) > last_incremental_value)
+                    # Convert Unix timestamp to datetime for proper comparison with SAS datetime columns
+                    # This handles the case where SAS datetimes are converted to datetime objects
+                    last_value_dt = datetime.fromtimestamp(last_incremental_value)
+
+                    # Try to filter - handle both datetime and numeric columns
+                    try:
+                        df = df.filter(pl.col(incremental_field) > last_value_dt)
+                    except Exception:
+                        # Fallback: if datetime comparison fails, try numeric comparison
+                        logging.warning(
+                            f"Datetime comparison failed for '{incremental_field}', "
+                            f"trying numeric comparison"
+                        )
+                        df = df.filter(pl.col(incremental_field) > last_incremental_value)
                 else:
                     logging.warning(f"Incremental field '{incremental_field}' not found in data, skipping filter")
 
