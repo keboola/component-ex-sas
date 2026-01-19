@@ -9,6 +9,8 @@
       "title": "Table to extract",
       "description": "Select a SAS table to extract",
       "options": {
+        "tags": true,
+        "creatable": true,
         "async": {
           "label": "Re-load tables",
           "action": "list_sas_tables"
