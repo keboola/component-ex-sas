@@ -289,21 +289,25 @@ class SasToCsvConverter:
 
         return total_rows
 
-    def convert_schema_to_keboola(self, schema_dict: dict) -> OrderedDict:
+    def convert_schema_to_keboola(self, schema_dict: dict, primary_key_columns: list[str] | None = None) -> OrderedDict:
         """
         Convert schema dictionary to Keboola schema format.
 
         Args:
             schema_dict: Schema dictionary (column_name -> type_string)
+            primary_key_columns: List of column names to mark as primary keys (optional)
 
         Returns:
             OrderedDict mapping column names to ColumnDefinition objects
         """
+        primary_key_columns = primary_key_columns or []
+
         schema = OrderedDict()
         for col_name, type_string in schema_dict.items():
             schema[col_name] = ColumnDefinition(
                 data_types=BaseType(dtype=self._convert_type_to_keboola(str(type_string))),
-                primary_key=False,
+                primary_key=col_name in primary_key_columns,
+                nullable=col_name not in primary_key_columns,
             )
 
         return schema

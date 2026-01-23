@@ -15,10 +15,6 @@ from configuration import Configuration
 from sas_to_csv_converter import SasToCsvConverter
 from sftp_client import SftpClient
 
-import os
-
-os.environ["KBC_DATA_TYPE_SUPPORT"] = "authoritative"
-
 
 class Component(ComponentBase):
     """
@@ -105,7 +101,9 @@ class Component(ComponentBase):
         )
 
         # Step 2: Convert schema to Keboola format
-        keboola_schema = converter.convert_schema_to_keboola(schema_dict)
+        keboola_schema = converter.convert_schema_to_keboola(
+            schema_dict, primary_key_columns=self.params.destination.primary_key
+        )
         logging.debug(f"Converted schema: {keboola_schema}")
 
         # Step 3: Create output table definition WITH schema
