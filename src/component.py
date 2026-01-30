@@ -159,15 +159,16 @@ class Component(ComponentBase):
 
     @sync_action("prepareRows")
     def prepare_rows(self):
-        configs = []
+        rows = []
         for table in self.params.init_tables:
-            conf = {"name": table, "configuration": {"table": table}}
-            configs.append(conf)
+            row = {
+                "name": table,
+                "description": f"SAS table: {table}",
+                "configuration": {"parameters": {"table": table}},
+            }
+            rows.append(row)
 
-        return {
-            "type": "data",
-            "data": configs,
-        }
+        return rows
 
 
 if __name__ == "__main__":
