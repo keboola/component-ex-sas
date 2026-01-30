@@ -157,6 +157,18 @@ class Component(ComponentBase):
         finally:
             self.sftp_client.close()
 
+    @sync_action("prepareRows")
+    def prepare_rows(self):
+        configs = []
+        for table in self.params.init_tables:
+            conf = {"name": table, "configuration": {"table": table}}
+            configs.append(conf)
+
+        return {
+            "type": "data",
+            "data": configs,
+        }
+
 
 if __name__ == "__main__":
     try:

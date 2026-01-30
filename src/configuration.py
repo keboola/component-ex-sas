@@ -48,6 +48,7 @@ class Configuration(BaseModel):
         default=10000, description="Number of rows to process at once (lower = less memory, slower)"
     )
     debug: bool = False
+    init_tables: list[str] | None = None
 
     def __init__(self, **data):
         try:
