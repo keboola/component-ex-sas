@@ -265,11 +265,11 @@ class SasToCsvConverter:
             if df.height == 0:
                 continue
 
-            # Format date and datetime columns to DD.MM.YYYY
+            # Format date and datetime columns to YYYY-MM-DD
             for col in df.columns:
                 col_dtype = str(df[col].dtype)
                 if "datetime" in col_dtype.lower() or "date" in col_dtype.lower():
-                    df = df.with_columns(pl.col(col).dt.strftime("%d.%m.%Y").alias(col))
+                    df = df.with_columns(pl.col(col).dt.strftime("%Y-%m-%d").alias(col))
 
             # Write using Polars native CSV writer
             if first_chunk:
