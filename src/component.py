@@ -25,16 +25,17 @@ class Component(ComponentBase):
         super().__init__()
         self.params = Configuration(**self.configuration.parameters)
 
+        self.sftp_client: SftpClient | None = None
+        self.converter: SasToCsvConverter | None = None
+        self._start_time = datetime.now()
+        self._last_incremental_value: float | int = 0
+
+    def _init_runtime(self):
         self.sftp_client = SftpClient(self.params.sftp)
         self.converter = SasToCsvConverter(
             max_memory_mb=self.params.duckdb_max_memory_mb, batch_size=self.params.batch_size
         )
 
-        # Store start time for incremental state
-        self._start_time = datetime.now()
-
-        # Load last incremental value from state file
-        self._last_incremental_value = 0  # Default to Unix timestamp 0
         if self.params.incremental_column:
             state = self.get_state_file()
             if state:
@@ -42,6 +43,7 @@ class Component(ComponentBase):
                 logging.info(f"Loaded last incremental value: {self._last_incremental_value}")
 
     def run(self):
+        self._init_runtime()
 
         start_time = datetime.now()
 
@@ -141,14 +143,15 @@ class Component(ComponentBase):
     @sync_action("list_sas_tables")
     def list_sas_tables(self):
         """Sync action to list SAS files from SFTP server."""
+        sftp_client = SftpClient(self.params.sftp)
         try:
-            self.sftp_client.connect()
+            sftp_client.connect()
 
             try:
-                sas_tables = self.sftp_client.list_sas_files()
+                sas_tables = sftp_client.list_sas_files()
                 return [SelectElement(label=f, value=f) for f in sas_tables]
             finally:
-                self.sftp_client.close()
+                sftp_client.close()
 
         except Exception as e:
             raise UserException(f"Failed to list SAS files: {e}")
@@ -156,15 +159,19 @@ class Component(ComponentBase):
     @sync_action("testConnection")
     def test_connection(self):
         """Sync action to test SFTP connection."""
+        sftp_client = SftpClient(self.params.sftp)
         try:
-            self.sftp_client.connect()
+            sftp_client.connect()
         except Exception as e:
             raise UserException(f"Connection test failed: {str(e)}")
         finally:
-            self.sftp_client.close()
+            sftp_client.close()
 
     @sync_action("prepareRows")
     def prepare_rows(self):
+        if not self.params.init_tables:
+            return []
+
         rows = []
         for table in self.params.init_tables:
             row = {
