@@ -27,7 +27,9 @@ class Component(ComponentBase):
 
         self.sftp_client = SftpClient(self.params.sftp)
         self.converter = SasToCsvConverter(
-            max_memory_mb=self.params.duckdb_max_memory_mb, batch_size=self.params.batch_size
+            max_memory_mb=self.params.duckdb_max_memory_mb,
+            batch_size=self.params.batch_size,
+            null_values=self.params.null_values,
         )
 
         # Store start time for incremental state
@@ -42,7 +44,6 @@ class Component(ComponentBase):
                 logging.info(f"Loaded last incremental value: {self._last_incremental_value}")
 
     def run(self):
-
         start_time = datetime.now()
 
         if self.params.destination.load_type == "debug":

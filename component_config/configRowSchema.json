@@ -73,12 +73,22 @@
       "default": 10000,
       "propertyOrder": 5
     },
+    "null_values": {
+      "type": "array",
+      "title": "Null Values",
+      "description": "List of strings to treat as NULL values (e.g., 'NA', 'N/A', '.')",
+      "items": {
+        "type": "string"
+      },
+      "default": [],
+      "propertyOrder": 6
+    },
     "debug": {
       "type": "boolean",
       "title": "Debug Mode",
       "description": "Enable detailed debug logging",
       "default": false,
-      "propertyOrder": 6
+      "propertyOrder": 7
     }
   }
 }

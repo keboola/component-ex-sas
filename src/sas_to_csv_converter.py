@@ -30,19 +30,21 @@ class SasToCsvConverter:
     - Exporting to CSV using DuckDB
     """
 
-    def __init__(self, max_memory_mb: int, batch_size: int = 100000):
+    def __init__(self, max_memory_mb: int, batch_size: int = 100000, null_values: list[str] | None = None):
         """
         Initialize converter and DuckDB connection.
 
         Args:
             max_memory_mb: Maximum memory allocation in MB
             batch_size: Number of rows to process at once (default: 100k for optimal performance)
+            null_values: List of strings to treat as NULL values
 
         Raises:
             UserException: If initialization fails
         """
         self.max_memory_mb = max_memory_mb
         self.batch_size = batch_size
+        self.null_values = null_values or []
 
         try:
             # Create temp directory
@@ -270,6 +272,14 @@ class SasToCsvConverter:
                 col_dtype = str(df[col].dtype)
                 if "datetime" in col_dtype.lower() or "date" in col_dtype.lower():
                     df = df.with_columns(pl.col(col).dt.strftime("%Y-%m-%d").alias(col))
+
+            # Replace null values with empty string (NULL in CSV)
+            if self.null_values:
+                for col in df.columns:
+                    if df[col].dtype == pl.Utf8 or df[col].dtype == pl.String:
+                        df = df.with_columns(
+                            pl.when(pl.col(col).is_in(self.null_values)).then(None).otherwise(pl.col(col)).alias(col)
+                        )
 
             # Write using Polars native CSV writer
             if first_chunk:

@@ -48,6 +48,7 @@ class Configuration(BaseModel):
     batch_size: int = Field(
         default=10000, description="Number of rows to process at once (lower = less memory, slower)"
     )
+    null_values: list[str] = Field(default_factory=list, description="List of strings to treat as NULL values")
     debug: bool = False
     init_tables: list[str] | None = None
 
