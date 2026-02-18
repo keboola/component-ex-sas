@@ -49,6 +49,9 @@ class Configuration(BaseModel):
         default=10000, description="Number of rows to process at once (lower = less memory, slower)"
     )
     null_values: list[str] = Field(default_factory=list, description="List of strings to treat as NULL values")
+    encoding: str = Field(
+        default="CP1250", description="SAS file encoding (iconv-compatible name, e.g. CP1250 for WLATIN2)"
+    )
     debug: bool = False
     init_tables: list[str] | None = None
 

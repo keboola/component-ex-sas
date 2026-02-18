@@ -30,6 +30,7 @@ class Component(ComponentBase):
             max_memory_mb=self.params.duckdb_max_memory_mb,
             batch_size=self.params.batch_size,
             null_values=self.params.null_values,
+            encoding=self.params.encoding,
         )
 
         # Store start time for incremental state

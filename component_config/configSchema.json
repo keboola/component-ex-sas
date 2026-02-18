@@ -56,10 +56,24 @@
       },
       "propertyOrder": 1
     },
+    "encoding": {
+      "type": "string",
+      "title": "SAS File Encoding",
+      "description": "Encoding of SAS files (iconv-compatible name). WLATIN2 = CP1250, WLATIN1 = CP1252, UTF-8 = UTF-8",
+      "default": "CP1250",
+      "enum": [
+        "CP1250",
+        "CP1252",
+        "UTF-8",
+        "LATIN1",
+        "LATIN2"
+      ],
+      "propertyOrder": 2
+    },
     "test_connection": {
       "type": "button",
       "format": "test-connection",
-      "propertyOrder": 2
+      "propertyOrder": 3
     }
   }
 }

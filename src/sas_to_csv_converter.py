@@ -30,7 +30,13 @@ class SasToCsvConverter:
     - Exporting to CSV using DuckDB
     """
 
-    def __init__(self, max_memory_mb: int, batch_size: int = 100000, null_values: list[str] | None = None):
+    def __init__(
+        self,
+        max_memory_mb: int,
+        batch_size: int = 100000,
+        null_values: list[str] | None = None,
+        encoding: str | None = None,
+    ):
         """
         Initialize converter and DuckDB connection.
 
@@ -38,6 +44,7 @@ class SasToCsvConverter:
             max_memory_mb: Maximum memory allocation in MB
             batch_size: Number of rows to process at once (default: 100k for optimal performance)
             null_values: List of strings to treat as NULL values
+            encoding: Encoding override for SAS files (iconv-compatible name, e.g. 'CP1250' for WLATIN2)
 
         Raises:
             UserException: If initialization fails
@@ -45,6 +52,7 @@ class SasToCsvConverter:
         self.max_memory_mb = max_memory_mb
         self.batch_size = batch_size
         self.null_values = null_values or []
+        self.encoding = encoding
 
         try:
             # Create temp directory
@@ -176,6 +184,7 @@ class SasToCsvConverter:
                 row_limit=1000,  # Only read first 1000 rows for schema
                 disable_datetime_conversion=False,
                 output_format="polars",
+                encoding=self.encoding,
             )
 
             # Map Polars dtypes to type strings
@@ -189,7 +198,7 @@ class SasToCsvConverter:
         except Exception as e:
             # Ultimate fallback: metadata only
             logging.warning(f"Schema detection failed, using metadata only: {e}")
-            _, meta = pyreadstat.read_sas7bdat(sas_file_path, metadataonly=True)
+            _, meta = pyreadstat.read_sas7bdat(sas_file_path, metadataonly=True, encoding=self.encoding)
 
             schema = {}
             for col_name in meta.column_names:
@@ -234,6 +243,7 @@ class SasToCsvConverter:
             chunksize=self.batch_size,
             disable_datetime_conversion=False,
             output_format="polars",
+            encoding=self.encoding,
         )
 
         total_rows = 0
