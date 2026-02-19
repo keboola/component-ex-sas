@@ -214,7 +214,44 @@ class SasToCsvConverter:
 
     def _detect_schema_from_metadata(self, sas_file_path: str) -> dict:
         _, meta = pyreadstat.read_sas7bdat(sas_file_path, metadataonly=True, encoding=self.encoding)
-        return dict(meta.readstat_variable_types)
+        raw_types = dict(meta.readstat_variable_types)
+        original_formats = dict(meta.original_variable_types)
+
+        # Override raw types with SAS format info when available
+        for col_name, sas_format in original_formats.items():
+            if sas_format:
+                mapped = self._sas_format_to_type(sas_format)
+                if mapped:
+                    raw_types[col_name] = mapped
+
+        return raw_types
+
+    @staticmethod
+    def _sas_format_to_type(sas_format: str) -> str | None:
+        """Map SAS format string to a type string recognized by _convert_type_to_keboola."""
+        fmt = sas_format.upper().rstrip("0123456789.")
+        if fmt in (
+            "DATE",
+            "DDMMYY",
+            "MMDDYY",
+            "YYMMDD",
+            "EURDFDE",
+            "JULDAY",
+            "JULIAN",
+            "MONYY",
+            "QTR",
+            "WEEKDATE",
+            "WORDDATE",
+            "YYMM",
+            "YYMON",
+            "YYQ",
+        ):
+            return "date"
+        if fmt in ("DATETIME", "DATEAMPM", "DTDATE", "DTMONYY", "DTWKDATX", "DTYEAR", "DTYYQC"):
+            return "timestamp"
+        if fmt in ("TIME", "HHMM", "HOUR", "MMSS", "TIMEAMPM", "TOD"):
+            return "timestamp"
+        return None
 
     def _convert_sas_to_csv_optimized(
         self,
