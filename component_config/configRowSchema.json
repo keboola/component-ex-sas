@@ -73,14 +73,11 @@
       "default": 10000,
       "propertyOrder": 5
     },
-    "null_values": {
-      "type": "array",
-      "title": "Null Values",
-      "description": "List of strings to treat as NULL values (e.g., 'NA', 'N/A', '.')",
-      "items": {
-        "type": "string"
-      },
-      "default": [],
+    "infer_dtypes": {
+      "type": "boolean",
+      "title": "Infer Data Types",
+      "description": "Infer column data types from data sample. If false, use SAS metadata types.",
+      "default": true,
       "propertyOrder": 6
     },
     "debug": {

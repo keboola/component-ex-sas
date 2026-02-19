@@ -70,10 +70,23 @@
       ],
       "propertyOrder": 2
     },
+    "null_values": {
+      "type": "array",
+      "title": "Null Values",
+      "description": "List of strings to treat as NULL values (e.g., 'NA', 'N/A', '.')",
+      "items": {
+        "type": "string"
+      },
+      "default": [],
+      "options": {
+        "tags": true
+      },
+      "propertyOrder": 3
+    },
     "test_connection": {
       "type": "button",
       "format": "test-connection",
-      "propertyOrder": 3
+      "propertyOrder": 4
     }
   }
 }
