@@ -31,6 +31,7 @@ class Component(ComponentBase):
             batch_size=self.params.batch_size,
             null_values=self.params.null_values,
             encoding=self.params.encoding,
+            infer_dtypes=self.params.infer_dtypes,
         )
 
         # Store start time for incremental state

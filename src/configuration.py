@@ -41,17 +41,12 @@ class Configuration(BaseModel):
     sftp: SftpConnection
     table: str | None = Field(default=None, description="SAS table file to extract")
     destination: Destination = Field(default_factory=Destination)
-    incremental_column: str | None = Field(
-        default=None, description="Column name for incremental extraction (timestamp or numeric)"
-    )
+    incremental_column: str | None = Field(default=None)
     duckdb_max_memory_mb: int = 768
-    batch_size: int = Field(
-        default=10000, description="Number of rows to process at once (lower = less memory, slower)"
-    )
+    batch_size: int = Field(default=10000)
     null_values: list[str] = Field(default_factory=list, description="List of strings to treat as NULL values")
-    encoding: str = Field(
-        default="CP1250", description="SAS file encoding (iconv-compatible name, e.g. CP1250 for WLATIN2)"
-    )
+    encoding: str = Field(default="CP1250")
+    infer_dtypes: bool = Field(default=False)
     debug: bool = False
     init_tables: list[str] | None = None
 

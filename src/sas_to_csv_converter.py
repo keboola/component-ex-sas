@@ -36,6 +36,7 @@ class SasToCsvConverter:
         batch_size: int = 100000,
         null_values: list[str] | None = None,
         encoding: str | None = None,
+        infer_dtypes: bool = True,
     ):
         """
         Initialize converter and DuckDB connection.
@@ -45,6 +46,7 @@ class SasToCsvConverter:
             batch_size: Number of rows to process at once (default: 100k for optimal performance)
             null_values: List of strings to treat as NULL values
             encoding: Encoding override for SAS files (iconv-compatible name, e.g. 'CP1250' for WLATIN2)
+            infer_dtypes: If True, infer types from data sample. If False, use SAS metadata types.
 
         Raises:
             UserException: If initialization fails
@@ -53,6 +55,7 @@ class SasToCsvConverter:
         self.batch_size = batch_size
         self.null_values = null_values or []
         self.encoding = encoding
+        self.infer_dtypes = infer_dtypes
 
         try:
             # Create temp directory
@@ -104,9 +107,12 @@ class SasToCsvConverter:
             sftp_client.download_file(remote_path, temp_file)
             logging.info(f"Downloaded in {time.time() - start_dl:.2f} seconds")
 
-            # Step 2: Detect schema using DuckDB (efficient, reads minimal data)
+            # Step 2: Detect schema
             logging.info("Detecting schema...")
-            schema_dict = self._detect_schema_with_duckdb(temp_file)
+            if self.infer_dtypes:
+                schema_dict = self._detect_schema_with_duckdb(temp_file)
+            else:
+                schema_dict = self._detect_schema_from_metadata(temp_file)
             logging.info(f"Schema detected: {len(schema_dict)} columns")
 
             return temp_file, schema_dict
@@ -205,6 +211,10 @@ class SasToCsvConverter:
                 schema[col_name] = "object"  # Default to string
 
             return schema
+
+    def _detect_schema_from_metadata(self, sas_file_path: str) -> dict:
+        _, meta = pyreadstat.read_sas7bdat(sas_file_path, metadataonly=True, encoding=self.encoding)
+        return dict(meta.readstat_variable_types)
 
     def _convert_sas_to_csv_optimized(
         self,
