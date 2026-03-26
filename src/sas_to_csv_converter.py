@@ -7,7 +7,7 @@ import logging
 import os
 import time
 from collections import OrderedDict
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import duckdb
 import polars as pl
@@ -283,6 +283,18 @@ class SasToCsvConverter:
         if incremental_field and last_incremental_value is not None:
             logging.info(f"Incremental mode: filtering {incremental_field} > {last_incremental_value}")
 
+        # Read metadata to identify date/datetime columns that pyreadstat may fail to convert
+        _, file_meta = pyreadstat.read_sas7bdat(sas_file_path, metadataonly=True, encoding=self.encoding)
+        sas_date_cols = set()
+        sas_datetime_cols = set()
+        for col_name, sas_format in dict(file_meta.original_variable_types).items():
+            if sas_format:
+                mapped = self._sas_format_to_type(sas_format)
+                if mapped == "date":
+                    sas_date_cols.add(col_name)
+                elif mapped == "timestamp":
+                    sas_datetime_cols.add(col_name)
+
         # Create iterator for chunked reading with Polars output
         reader = pyreadstat.read_file_in_chunks(
             pyreadstat.read_sas7bdat,
@@ -323,6 +335,34 @@ class SasToCsvConverter:
             # Skip empty chunks after filtering
             if df.height == 0:
                 continue
+
+            # Convert numeric columns that should be dates but weren't converted by pyreadstat
+            # SAS dates = days since 1960-01-01, SAS datetimes = seconds since 1960-01-01
+            sas_epoch = datetime(1960, 1, 1)
+            for col in df.columns:
+                col_dtype = str(df[col].dtype).lower()
+                if col in sas_date_cols and ("float" in col_dtype or "int" in col_dtype):
+                    df = df.with_columns(
+                        pl.col(col)
+                        .cast(pl.Int64, strict=False)
+                        .map_elements(
+                            lambda x: (sas_epoch + timedelta(days=x)).strftime("%Y-%m-%d") if x is not None else None,
+                            return_dtype=pl.Utf8,
+                        )
+                        .alias(col)
+                    )
+                elif col in sas_datetime_cols and ("float" in col_dtype or "int" in col_dtype):
+                    df = df.with_columns(
+                        pl.col(col)
+                        .cast(pl.Int64, strict=False)
+                        .map_elements(
+                            lambda x: (sas_epoch + timedelta(seconds=x)).strftime("%Y-%m-%d %H:%M:%S")
+                            if x is not None
+                            else None,
+                            return_dtype=pl.Utf8,
+                        )
+                        .alias(col)
+                    )
 
             # Format date and datetime columns to YYYY-MM-DD
             for col in df.columns:
