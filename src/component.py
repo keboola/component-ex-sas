@@ -34,16 +34,15 @@ class Component(ComponentBase):
             infer_dtypes=self.params.infer_dtypes,
         )
 
-        # Store start time for incremental state
-        self._start_time = datetime.now()
-
-        # Load last incremental value from state file
-        self._last_incremental_value = 0  # Default to Unix timestamp 0
+        # Load last incremental value from state file (stored as string in column-native format)
+        self._last_incremental_value: str | None = None
         if self.params.incremental_column:
             state = self.get_state_file()
             if state:
-                self._last_incremental_value = state.get("last_incremental_value", 0)
-                logging.info(f"Loaded last incremental value: {self._last_incremental_value}")
+                stored = state.get("last_incremental_value")
+                if stored is not None:
+                    self._last_incremental_value = str(stored)
+                    logging.info(f"Loaded last incremental value: {self._last_incremental_value}")
 
     def run(self):
         start_time = datetime.now()
@@ -59,7 +58,7 @@ class Component(ComponentBase):
             logging.info(f"Processing file: {sas_file}")
 
             # Process the file
-            row_count = self._process_sas_file(
+            row_count, new_incremental_value = self._process_sas_file(
                 sftp_client=self.sftp_client,
                 converter=self.converter,
                 sas_file=sas_file,
@@ -72,11 +71,12 @@ class Component(ComponentBase):
             else:
                 logging.info(f"No data found in {sas_file}")
 
-            # Save state if incremental column is specified
+            # Save state if incremental column is specified — preserve previous value if no new max found
             if self.params.incremental_column:
-                state = {"last_incremental_value": self._start_time.timestamp()}
-                self.write_state_file(state)
-                logging.info(f"Saved state: last_incremental_value = {self._start_time.timestamp()}")
+                final_value = new_incremental_value if new_incremental_value is not None else self._last_incremental_value
+                if final_value is not None:
+                    self.write_state_file({"last_incremental_value": final_value})
+                    logging.info(f"Saved state: last_incremental_value = {final_value}")
 
         finally:
             # Clean up connections
@@ -88,7 +88,7 @@ class Component(ComponentBase):
         sftp_client: SftpClient,
         converter: SasToCsvConverter,
         sas_file: str,
-    ) -> int:
+    ) -> tuple[int, str | None]:
         """
         Process a single SAS file: infer schema first, then create table definition and write CSV.
         """
@@ -119,7 +119,7 @@ class Component(ComponentBase):
         )
 
         # Step 4: Convert SAS to CSV (uses already downloaded temp file)
-        row_count = converter.convert_sas_to_csv(
+        row_count, new_incremental_value = converter.convert_sas_to_csv(
             temp_file=temp_file,
             output_path=out_table.full_path,
             incremental_field=self.params.incremental_column,
@@ -128,13 +128,13 @@ class Component(ComponentBase):
         logging.info(f"Successfully processed {sas_file}")
 
         if row_count == 0:
-            return 0
+            return 0, new_incremental_value
 
         # Step 5: Write manifest
         self.write_manifest(out_table)
 
         logging.info(f"Successfully streamed {row_count:,} rows to '{table_name}.csv'")
-        return row_count
+        return row_count, new_incremental_value
 
     @sync_action("list_sas_tables")
     def list_sas_tables(self):

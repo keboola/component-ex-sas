@@ -7,7 +7,7 @@ import logging
 import os
 import time
 from collections import OrderedDict
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 import duckdb
 import polars as pl
@@ -131,8 +131,8 @@ class SasToCsvConverter:
         temp_file: str,
         output_path: str,
         incremental_field: str | None = None,
-        last_incremental_value: float | int | None = None,
-    ) -> int:
+        last_incremental_value: str | None = None,
+    ) -> tuple[int, str | None]:
         """
         Convert already downloaded SAS file to CSV using optimized pyreadstat chunking.
 
@@ -140,10 +140,10 @@ class SasToCsvConverter:
             temp_file: Path to temporary SAS file (from infer_sas_schema)
             output_path: Path where CSV should be written (from table definition)
             incremental_field: Column name for incremental filtering (optional)
-            last_incremental_value: Last incremental value to filter from (optional)
+            last_incremental_value: Last incremental value (column-native string form) to filter from
 
         Returns:
-            Total number of rows converted
+            Tuple of (total_rows, new_max_incremental_value_as_string)
 
         Raises:
             UserException: If conversion fails
@@ -151,20 +151,23 @@ class SasToCsvConverter:
         try:
             # Convert SAS to CSV using optimized pyreadstat
             start_convert = time.time()
-            total_rows = self._convert_sas_to_csv_optimized(
+            total_rows, new_max_value = self._convert_sas_to_csv_optimized(
                 temp_file, output_path, incremental_field, last_incremental_value
             )
 
             total_duration = time.time() - start_convert
-            logging.info(
-                f"Converted {total_rows:,} rows to CSV in {total_duration:.2f} seconds "
-                f"({total_rows / total_duration:.0f} rows/sec)"
-            )
+            if total_rows > 0:
+                logging.info(
+                    f"Converted {total_rows:,} rows to CSV in {total_duration:.2f} seconds "
+                    f"({total_rows / total_duration:.0f} rows/sec)"
+                )
 
-            return total_rows
+            return total_rows, new_max_value
 
+        except UserException:
+            raise
         except Exception as e:
-            raise UserException(f"Failed to convert SAS file to CSV: {e}")
+            raise UserException(f"Failed to convert SAS file to CSV: {e}") from e
         finally:
             # Clean up temp file
             if os.path.exists(temp_file):
@@ -227,6 +230,62 @@ class SasToCsvConverter:
         return raw_types
 
     @staticmethod
+    def _parse_incremental_threshold(
+        value_str: str,
+        col_name: str,
+        col_dtype: pl.DataType,
+        sas_date_cols: set,
+        sas_datetime_cols: set,
+    ):
+        """
+        Parse stored incremental value (string) into a value comparable against the column's native dtype.
+
+        SAS date/datetime columns left as numeric by pyreadstat are compared in SAS units
+        (days/seconds since 1960-01-01). All other columns use the column's native Python type.
+        """
+        sas_epoch = datetime(1960, 1, 1)
+        try:
+            if col_name in sas_date_cols:
+                d = date.fromisoformat(value_str)
+                return float((datetime.combine(d, datetime.min.time()) - sas_epoch).days)
+            if col_name in sas_datetime_cols:
+                dt = datetime.fromisoformat(value_str)
+                return float((dt - sas_epoch).total_seconds())
+
+            dtype_str = str(col_dtype).lower()
+            if "datetime" in dtype_str:
+                return datetime.fromisoformat(value_str)
+            if "date" in dtype_str:
+                return date.fromisoformat(value_str)
+            if any(t in dtype_str for t in ("int", "float", "decimal")):
+                return float(value_str)
+            return value_str
+        except (ValueError, TypeError) as e:
+            raise UserException(
+                f"Cannot apply incremental filter on '{col_name}': "
+                f"stored value '{value_str}' is incompatible with column type '{col_dtype}' ({e})"
+            ) from e
+
+    @staticmethod
+    def _format_incremental_value(
+        value,
+        col_name: str,
+        sas_date_cols: set,
+        sas_datetime_cols: set,
+    ) -> str:
+        """Format a native max value back to a string suitable for state storage."""
+        sas_epoch = datetime(1960, 1, 1)
+        if col_name in sas_date_cols:
+            return (sas_epoch + timedelta(days=int(value))).date().isoformat()
+        if col_name in sas_datetime_cols:
+            return (sas_epoch + timedelta(seconds=float(value))).isoformat()
+        if isinstance(value, datetime):
+            return value.isoformat()
+        if isinstance(value, date):
+            return value.isoformat()
+        return str(value)
+
+    @staticmethod
     def _sas_format_to_type(sas_format: str) -> str | None:
         """Map SAS format string to a type string recognized by _convert_type_to_keboola."""
         fmt = sas_format.upper().rstrip("0123456789.")
@@ -258,8 +317,8 @@ class SasToCsvConverter:
         sas_file_path: str,
         csv_file_path: str,
         incremental_field: str | None = None,
-        last_incremental_value: float | int | None = None,
-    ) -> int:
+        last_incremental_value: str | None = None,
+    ) -> tuple[int, str | None]:
         """
         Convert SAS file to CSV using Polars output from pyreadstat.
 
@@ -308,29 +367,35 @@ class SasToCsvConverter:
         total_rows = 0
         chunk_num = 0
         first_chunk = True
+        running_max = None  # Native max value of incremental column across all chunks
 
         for df, meta in reader:
             chunk_num += 1
             chunk_start = time.time()
 
-            # Apply incremental filter if specified
-            if incremental_field and last_incremental_value is not None:
-                if incremental_field in df.columns:
-                    # Convert Unix timestamp to datetime for proper comparison with SAS datetime columns
-                    # This handles the case where SAS datetimes are converted to datetime objects
-                    last_value_dt = datetime.fromtimestamp(last_incremental_value)
-
-                    # Try to filter - handle both datetime and numeric columns
-                    try:
-                        df = df.filter(pl.col(incremental_field) > last_value_dt)
-                    except Exception:
-                        # Fallback: if datetime comparison fails, try numeric comparison
+            # Apply incremental filter against the column's native dtype
+            if incremental_field:
+                if incremental_field not in df.columns:
+                    if chunk_num == 1:
                         logging.warning(
-                            f"Datetime comparison failed for '{incremental_field}', trying numeric comparison"
+                            f"Incremental field '{incremental_field}' not found in data, skipping filter"
                         )
-                        df = df.filter(pl.col(incremental_field) > last_incremental_value)
                 else:
-                    logging.warning(f"Incremental field '{incremental_field}' not found in data, skipping filter")
+                    if last_incremental_value is not None:
+                        threshold = self._parse_incremental_threshold(
+                            last_incremental_value,
+                            incremental_field,
+                            df[incremental_field].dtype,
+                            sas_date_cols,
+                            sas_datetime_cols,
+                        )
+                        df = df.filter(pl.col(incremental_field) > threshold)
+
+                    # Track max value of incremental column in native dtype
+                    if df.height > 0:
+                        chunk_max = df[incremental_field].max()
+                        if chunk_max is not None and (running_max is None or chunk_max > running_max):
+                            running_max = chunk_max
 
             # Skip empty chunks after filtering
             if df.height == 0:
@@ -394,7 +459,13 @@ class SasToCsvConverter:
             chunk_duration = time.time() - chunk_start
             logging.info(f"Chunk {chunk_num}: {rows_in_chunk:,} rows (total: {total_rows:,}) in {chunk_duration:.2f}s")
 
-        return total_rows
+        new_max_str: str | None = None
+        if running_max is not None and incremental_field:
+            new_max_str = self._format_incremental_value(
+                running_max, incremental_field, sas_date_cols, sas_datetime_cols
+            )
+
+        return total_rows, new_max_str
 
     def convert_schema_to_keboola(self, schema_dict: dict, primary_key_columns: list[str] | None = None) -> OrderedDict:
         """
