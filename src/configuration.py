@@ -7,7 +7,6 @@ from pydantic import BaseModel, Field, ValidationError, computed_field, field_va
 class LoadType(str, Enum):
     full_load = "full_load"
     incremental_load = "incremental_load"
-    debug = "debug"
 
 
 class SftpConnection(BaseModel):

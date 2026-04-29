@@ -48,11 +48,6 @@ class Component(ComponentBase):
     def run(self):
         start_time = datetime.now()
 
-        if self.params.destination.load_type == "debug":
-            logging.info("Loading debug table")
-            logging.info(self.prepare_rows())
-            exit(0)
-
         try:
             self.sftp_client.connect()
 
