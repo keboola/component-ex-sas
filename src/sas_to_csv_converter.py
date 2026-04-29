@@ -401,33 +401,33 @@ class SasToCsvConverter:
             if df.height == 0:
                 continue
 
-            # Convert numeric columns that should be dates but weren't converted by pyreadstat
-            # SAS dates = days since 1960-01-01, SAS datetimes = seconds since 1960-01-01
-            sas_epoch = datetime(1960, 1, 1)
+            # Convert numeric columns that should be dates but weren't converted by pyreadstat.
+            # SAS dates = days since 1960-01-01, SAS datetimes = seconds since 1960-01-01.
+            # Vectorized via pl.duration; nulls propagate naturally.
+            sas_epoch_lit = pl.lit(datetime(1960, 1, 1))
+            sas_date_exprs = []
+            sas_datetime_exprs = []
             for col in df.columns:
                 col_dtype = str(df[col].dtype).lower()
-                if col in sas_date_cols and ("float" in col_dtype or "int" in col_dtype):
-                    df = df.with_columns(
-                        pl.col(col)
-                        .cast(pl.Int64, strict=False)
-                        .map_elements(
-                            lambda x: (sas_epoch + timedelta(days=x)).strftime("%Y-%m-%d") if x is not None else None,
-                            return_dtype=pl.Utf8,
-                        )
+                if not ("float" in col_dtype or "int" in col_dtype):
+                    continue
+                if col in sas_date_cols:
+                    sas_date_exprs.append(
+                        (sas_epoch_lit + pl.duration(days=pl.col(col).cast(pl.Int64, strict=False)))
+                        .cast(pl.Date)
                         .alias(col)
                     )
-                elif col in sas_datetime_cols and ("float" in col_dtype or "int" in col_dtype):
-                    df = df.with_columns(
-                        pl.col(col)
-                        .cast(pl.Int64, strict=False)
-                        .map_elements(
-                            lambda x: (sas_epoch + timedelta(seconds=x)).strftime("%Y-%m-%d %H:%M:%S")
-                            if x is not None
-                            else None,
-                            return_dtype=pl.Utf8,
-                        )
+                elif col in sas_datetime_cols:
+                    # Format directly to string with full HH:MM:SS so the next strftime loop skips it.
+                    sas_datetime_exprs.append(
+                        (sas_epoch_lit + pl.duration(seconds=pl.col(col).cast(pl.Int64, strict=False)))
+                        .dt.strftime("%Y-%m-%d %H:%M:%S")
                         .alias(col)
                     )
+            if sas_date_exprs:
+                df = df.with_columns(sas_date_exprs)
+            if sas_datetime_exprs:
+                df = df.with_columns(sas_datetime_exprs)
 
             # Format date and datetime columns to YYYY-MM-DD
             for col in df.columns:
