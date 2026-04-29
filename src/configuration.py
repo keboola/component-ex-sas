@@ -45,7 +45,7 @@ class Configuration(BaseModel):
     batch_size: int = Field(default=10000)
     null_values: list[str] = Field(default_factory=list, description="List of strings to treat as NULL values")
     encoding: str = Field(default="CP1250")
-    infer_dtypes: bool = Field(default=False)
+    infer_dtypes: bool = Field(default=True)
     debug: bool = False
     init_tables: list[str] | None = None
 
