@@ -57,15 +57,6 @@
       "description": "Column name for incremental extraction (timestamp or numeric). Only extracts rows greater than last run value.",
       "propertyOrder": 3
     },
-    "duckdb_max_memory_mb": {
-      "type": "integer",
-      "title": "DuckDB Maximum Memory (MB)",
-      "description": "Maximum memory allocation for DuckDB processing",
-      "default": 768,
-      "minimum": 128,
-      "maximum": 16384,
-      "propertyOrder": 4
-    },
     "batch_size": {
       "type": "integer",
       "title": "Batch Size",

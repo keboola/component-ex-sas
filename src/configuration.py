@@ -42,7 +42,6 @@ class Configuration(BaseModel):
     table: str | None = Field(default=None, description="SAS table file to extract")
     destination: Destination = Field(default_factory=Destination)
     incremental_column: str | None = Field(default=None)
-    duckdb_max_memory_mb: int = 768
     batch_size: int = Field(default=10000)
     null_values: list[str] = Field(default_factory=list, description="List of strings to treat as NULL values")
     encoding: str = Field(default="CP1250")

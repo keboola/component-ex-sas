@@ -9,7 +9,6 @@ import time
 from collections import OrderedDict
 from datetime import date, datetime, timedelta
 
-import duckdb
 import polars as pl
 import pyreadstat
 from keboola.component.dao import BaseType, ColumnDefinition, SupportedDataTypes
@@ -24,15 +23,12 @@ class SasToCsvConverter:
     """
     Converter for SAS files to CSV format.
 
-    Handles:
-    - Loading SAS files from SFTP using Polars + polars_readstat
-    - Schema detection and type mapping
-    - Exporting to CSV using DuckDB
+    Reads SAS files with pyreadstat (Polars output), streams chunks to CSV via Polars'
+    native CSV writer.
     """
 
     def __init__(
         self,
-        max_memory_mb: int,
         batch_size: int = 100000,
         null_values: list[str] | None = None,
         encoding: str | None = None,
@@ -40,10 +36,7 @@ class SasToCsvConverter:
         datetime_as_date: bool = False,
     ):
         """
-        Initialize converter and DuckDB connection.
-
         Args:
-            max_memory_mb: Maximum memory allocation in MB
             batch_size: Number of rows to process at once (default: 100k for optimal performance)
             null_values: List of strings to treat as NULL values
             encoding: Encoding override for SAS files (iconv-compatible name, e.g. 'CP1250' for WLATIN2)
@@ -53,7 +46,6 @@ class SasToCsvConverter:
         Raises:
             UserException: If initialization fails
         """
-        self.max_memory_mb = max_memory_mb
         self.batch_size = batch_size
         self.null_values = null_values or []
         self.encoding = encoding
@@ -61,17 +53,7 @@ class SasToCsvConverter:
         self.datetime_as_date = datetime_as_date
 
         try:
-            # Create temp directory
             os.makedirs(TEMP_DIR, exist_ok=True)
-
-            # DuckDB configuration (for schema detection)
-            config = {
-                "temp_directory": TEMP_DIR,
-                "max_memory": f"{self.max_memory_mb}MB",
-            }
-
-            self.conn = duckdb.connect(config=config)
-
         except Exception as e:
             raise UserException(f"Failed to initialize converter: {e}")
 
@@ -183,6 +165,12 @@ class SasToCsvConverter:
         """
         Detect schema from SAS file using pyreadstat with Polars output.
 
+        For numeric columns whose SAS original format indicates a date or timestamp,
+        override the Polars dtype with the SAS-format-derived type so the manifest
+        matches what _convert_sas_to_csv_optimized actually writes (which manually
+        converts those numeric columns to date/datetime strings using
+        meta.original_variable_types).
+
         Args:
             sas_file_path: Path to SAS file
 
@@ -199,11 +187,22 @@ class SasToCsvConverter:
                 encoding=self.encoding,
             )
 
-            # Map Polars dtypes to type strings
+            sas_format_overrides = {
+                col: self._sas_format_to_type(fmt) for col, fmt in dict(meta.original_variable_types).items() if fmt
+            }
+
             schema = {}
             for col_name in df.columns:
                 polars_dtype = str(df[col_name].dtype)
-                schema[col_name] = polars_dtype
+                # If the column is still numeric but the SAS format says it's a
+                # date/timestamp, the runtime path will emit date strings — match
+                # that in the manifest.
+                if ("int" in polars_dtype.lower() or "float" in polars_dtype.lower()) and sas_format_overrides.get(
+                    col_name
+                ) in ("date", "timestamp"):
+                    schema[col_name] = sas_format_overrides[col_name]
+                else:
+                    schema[col_name] = polars_dtype
 
             return schema
 
@@ -518,11 +517,3 @@ class SasToCsvConverter:
             return SupportedDataTypes.DATE
         else:
             return SupportedDataTypes.STRING
-
-    def close(self):
-        """Close DuckDB connection and clean up resources."""
-        if self.conn:
-            try:
-                self.conn.close()
-            except Exception as e:
-                logging.warning(f"Error closing DuckDB connection: {e}")

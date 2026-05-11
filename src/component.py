@@ -27,7 +27,6 @@ class Component(ComponentBase):
 
         self.sftp_client = SftpClient(self.params.sftp)
         self.converter = SasToCsvConverter(
-            max_memory_mb=self.params.duckdb_max_memory_mb,
             batch_size=self.params.batch_size,
             null_values=self.params.null_values,
             encoding=self.params.encoding,
@@ -82,8 +81,6 @@ class Component(ComponentBase):
                     logging.info(f"Saved state: last_incremental_value = {final_value}")
 
         finally:
-            # Clean up connections
-            self.converter.close()
             self.sftp_client.close()
 
     def _process_sas_file(
