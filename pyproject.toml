@@ -13,3 +13,12 @@ dependencies = [
     "pydantic>=2.11.3",
     "ruff>=0.11.5",
 ]
+
+[tool.ruff]
+line-length = 120
+extend-exclude = [
+    "__pycache__",
+    ".venv",
+    "venv",
+]
+
