@@ -177,7 +177,7 @@ class SftpClient:
             raise UserException("Not connected to SFTP server. Call connect() first.")
 
         try:
-            full_path = f"{self.config.folder_path}/{filename}"
+            full_path = self._join_path(filename)
             attrs = self.sftp_client.stat(full_path)
 
             return FileMetadata(
@@ -201,8 +201,12 @@ class SftpClient:
         Returns:
             SFTP URL (e.g., 'sftp:///path/to/file.sas7bdat')
         """
-        full_path = f"{self.config.folder_path}/{filename}"
-        return f"sftp://{full_path}"
+        return f"sftp://{self._join_path(filename)}"
+
+    def _join_path(self, filename: str) -> str:
+        """Join folder_path with a filename, avoiding double slashes when folder_path is '/'."""
+        base = self.config.folder_path
+        return f"/{filename}" if base == "/" else f"{base}/{filename}"
 
     def close(self):
         """

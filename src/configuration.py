@@ -20,8 +20,9 @@ class SftpConnection(BaseModel):
 
     @field_validator("folder_path")
     def validate_folder_path(cls, v):
-        # Ensure path doesn't end with trailing slash for consistency
-        return v.rstrip("/")
+        # Strip trailing slashes for consistency, but preserve the root path '/'.
+        stripped = v.rstrip("/")
+        return stripped or "/"
 
 
 class Destination(BaseModel):
