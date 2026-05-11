@@ -37,6 +37,7 @@ class SasToCsvConverter:
         null_values: list[str] | None = None,
         encoding: str | None = None,
         infer_dtypes: bool = True,
+        datetime_as_date: bool = False,
     ):
         """
         Initialize converter and DuckDB connection.
@@ -47,6 +48,7 @@ class SasToCsvConverter:
             null_values: List of strings to treat as NULL values
             encoding: Encoding override for SAS files (iconv-compatible name, e.g. 'CP1250' for WLATIN2)
             infer_dtypes: If True, infer types from data sample. If False, use SAS metadata types.
+            datetime_as_date: If True, truncate datetime columns to date (YYYY-MM-DD) on output.
 
         Raises:
             UserException: If initialization fails
@@ -56,6 +58,7 @@ class SasToCsvConverter:
         self.null_values = null_values or []
         self.encoding = encoding
         self.infer_dtypes = infer_dtypes
+        self.datetime_as_date = datetime_as_date
 
         try:
             # Create temp directory
@@ -377,9 +380,7 @@ class SasToCsvConverter:
             if incremental_field:
                 if incremental_field not in df.columns:
                     if chunk_num == 1:
-                        logging.warning(
-                            f"Incremental field '{incremental_field}' not found in data, skipping filter"
-                        )
+                        logging.warning(f"Incremental field '{incremental_field}' not found in data, skipping filter")
                 else:
                     if last_incremental_value is not None:
                         threshold = self._parse_incremental_threshold(
@@ -418,10 +419,11 @@ class SasToCsvConverter:
                         .alias(col)
                     )
                 elif col in sas_datetime_cols:
-                    # Format directly to string with full HH:MM:SS so the next strftime loop skips it.
+                    # Format directly to string so the next strftime loop skips it.
+                    datetime_fmt = "%Y-%m-%d" if self.datetime_as_date else "%Y-%m-%d %H:%M:%S"
                     sas_datetime_exprs.append(
                         (sas_epoch_lit + pl.duration(seconds=pl.col(col).cast(pl.Int64, strict=False)))
-                        .dt.strftime("%Y-%m-%d %H:%M:%S")
+                        .dt.strftime(datetime_fmt)
                         .alias(col)
                     )
             if sas_date_exprs:
@@ -429,11 +431,15 @@ class SasToCsvConverter:
             if sas_datetime_exprs:
                 df = df.with_columns(sas_datetime_exprs)
 
-            # Format date and datetime columns to YYYY-MM-DD
+            # Format date columns to YYYY-MM-DD and datetime columns to full timestamp
+            # (or to YYYY-MM-DD when datetime_as_date is enabled).
             for col in df.columns:
-                col_dtype = str(df[col].dtype)
-                if "datetime" in col_dtype.lower() or "date" in col_dtype.lower():
+                col_dtype = df[col].dtype
+                if col_dtype == pl.Date:
                     df = df.with_columns(pl.col(col).dt.strftime("%Y-%m-%d").alias(col))
+                elif isinstance(col_dtype, pl.Datetime):
+                    fmt = "%Y-%m-%d" if self.datetime_as_date else "%Y-%m-%d %H:%M:%S"
+                    df = df.with_columns(pl.col(col).dt.strftime(fmt).alias(col))
 
             # Replace null values with empty string (NULL in CSV)
             if self.null_values:

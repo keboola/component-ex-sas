@@ -80,12 +80,19 @@
       "default": true,
       "propertyOrder": 6
     },
+    "datetime_as_date": {
+      "type": "boolean",
+      "title": "Output datetimes as dates",
+      "description": "If enabled, datetime columns are written as YYYY-MM-DD (time component dropped). Disabled by default - full timestamp is preserved.",
+      "default": false,
+      "propertyOrder": 7
+    },
     "debug": {
       "type": "boolean",
       "title": "Debug Mode",
       "description": "Enable detailed debug logging",
       "default": false,
-      "propertyOrder": 7
+      "propertyOrder": 8
     }
   }
 }

@@ -46,6 +46,7 @@ class Configuration(BaseModel):
     null_values: list[str] = Field(default_factory=list, description="List of strings to treat as NULL values")
     encoding: str = Field(default="CP1250")
     infer_dtypes: bool = Field(default=True)
+    datetime_as_date: bool = Field(default=False)
     debug: bool = False
     init_tables: list[str] | None = None
 

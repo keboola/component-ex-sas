@@ -32,6 +32,7 @@ class Component(ComponentBase):
             null_values=self.params.null_values,
             encoding=self.params.encoding,
             infer_dtypes=self.params.infer_dtypes,
+            datetime_as_date=self.params.datetime_as_date,
         )
 
         # Load last incremental value from state file (stored as string in column-native format)
@@ -73,7 +74,9 @@ class Component(ComponentBase):
 
             # Save state if incremental column is specified — preserve previous value if no new max found
             if self.params.incremental_column:
-                final_value = new_incremental_value if new_incremental_value is not None else self._last_incremental_value
+                final_value = (
+                    new_incremental_value if new_incremental_value is not None else self._last_incremental_value
+                )
                 if final_value is not None:
                     self.write_state_file({"last_incremental_value": final_value})
                     logging.info(f"Saved state: last_incremental_value = {final_value}")
