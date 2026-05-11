@@ -68,7 +68,7 @@ class SasToCsvConverter:
 
         Workflow:
         1. Download SAS file via SFTP to temp directory
-        2. Detect schema using DuckDB (first 1000 rows)
+        2. Detect schema by sampling the first 1000 rows (or from SAS metadata only)
 
         Args:
             sftp_url: SFTP URL to SAS file
@@ -95,7 +95,7 @@ class SasToCsvConverter:
             # Step 2: Detect schema
             logging.info("Detecting schema...")
             if self.infer_dtypes:
-                schema_dict = self._detect_schema_with_duckdb(temp_file)
+                schema_dict = self._detect_schema_from_sample(temp_file)
             else:
                 schema_dict = self._detect_schema_from_metadata(temp_file)
             logging.info(f"Schema detected: {len(schema_dict)} columns")
@@ -161,7 +161,7 @@ class SasToCsvConverter:
                 except Exception as e:
                     logging.warning(f"Failed to remove temp file: {e}")
 
-    def _detect_schema_with_duckdb(self, sas_file_path: str) -> dict:
+    def _detect_schema_from_sample(self, sas_file_path: str) -> dict:
         """
         Detect schema from SAS file using pyreadstat with Polars output.
 

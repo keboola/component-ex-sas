@@ -25,7 +25,8 @@
       ]
     },
     "incremental_column": "last_updated",
-    "duckdb_max_memory_mb": 768,
-    "debug": false
+    "batch_size": 10000,
+    "infer_dtypes": true,
+    "datetime_as_date": false
   }
 }

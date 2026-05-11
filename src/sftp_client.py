@@ -193,13 +193,13 @@ class SftpClient:
 
     def get_sftp_url(self, filename: str) -> str:
         """
-        Construct SFTP URL for DuckDB to read.
+        Construct an `sftp://` URL pointing at a file inside the configured folder.
 
         Args:
-            filename: Name of the file (not full path)
+            filename: Name of the file (not full path).
 
         Returns:
-            SFTP URL (e.g., 'sftp:///path/to/file.sas7bdat')
+            SFTP URL (e.g., 'sftp:///path/to/file.sas7bdat').
         """
         return f"sftp://{self._join_path(filename)}"
 

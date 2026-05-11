@@ -1,6 +1,6 @@
 # SAS File Extractor
 
-Keboola Connection extractor component for loading SAS (.sas7bdat) files from SFTP servers.
+Keboola Connection extractor that loads SAS (`.sas7bdat`) files from an SFTP server into Storage as tables.
 
 **Table of Contents:**
 
@@ -8,124 +8,75 @@ Keboola Connection extractor component for loading SAS (.sas7bdat) files from SF
 
 ## Overview
 
-This component extracts SAS files from SFTP servers using DuckDB's `read_stat` extension and loads them into Keboola Storage as tables. It streams data directly from SFTP without creating local temporary files, making it memory-efficient for large datasets.
+The component connects to an SFTP server, downloads a `.sas7bdat` file, and converts it to a Keboola Storage table. It is a row-based component — each configuration row corresponds to one SAS table. SFTP credentials and a few file-level options live on the root config and are shared across all rows.
 
-### Key Features
+Internally the component uses **pyreadstat** to parse SAS files into **Polars** DataFrames, then streams chunks through Polars' native CSV writer.
 
-- **Direct SFTP Streaming**: Reads SAS files directly from SFTP server without local downloads
-- **DuckDB Integration**: Uses DuckDB's `read_stat` extension for efficient SAS file parsing
-- **Dual Incremental Loading**:
-  - **File-Level**: Only processes new or modified files based on modification timestamps
-  - **Data-Level**: Within files, only loads rows with timestamps newer than last processing
-- **Automatic Schema Detection**: Automatically detects column types and maps to Keboola types
-- **Dynamic File Selection**: Sync action to list available SAS files from SFTP server
-- **Memory Efficient**: Configurable memory limits with automatic spill-to-disk
+### Key features
 
-## How It Works
+- Per-row table selection via a `list_sas_tables` sync action against the SFTP folder.
+- `testConnection` sync action validates SFTP credentials from the UI.
+- `prepareRows` sync action generates one row per table for bulk setup.
+- Chunked, memory-bounded conversion (configurable batch size).
+- Optional **data-level incremental load** via a user-chosen column; the maximum value is persisted in the row's state file and reused on the next run.
+- Configurable SAS file encoding (handles CP1250 / WLATIN2 and similar legacy encodings).
+- Custom strings can be mapped to NULL.
+- SAS date/datetime columns are detected via pyreadstat plus SAS format overrides; numeric date/timestamp columns that pyreadstat does not auto-convert are converted using the SAS epoch (1960-01-01).
 
-### Architecture
+## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│ 1. Connect to SFTP Server                                   │
-│    • paramiko (for listing files)                           │
-│    • fsspec (for DuckDB streaming)                          │
-└──────────────┬──────────────────────────────────────────────┘
-               │
-               ↓
-┌─────────────────────────────────────────────────────────────┐
-│ 2. Initialize DuckDB                                        │
-│    • Install read_stat extension from community             │
-│    • Register SFTP filesystem                               │
-└──────────────┬──────────────────────────────────────────────┘
-               │
-               ↓
-┌─────────────────────────────────────────────────────────────┐
-│ 3. For Each SAS File:                                       │
-│                                                              │
-│    ┌───────────────────────────────────────────────┐       │
-│    │ Check File-Level Incremental                  │       │
-│    │  • Compare modification timestamps             │       │
-│    │  • Skip if unchanged                           │       │
-│    └───────────┬───────────────────────────────────┘       │
-│                ↓                                             │
-│    ┌───────────────────────────────────────────────┐       │
-│    │ Stream SAS File → DuckDB                      │       │
-│    │  • read_stat() reads via fsspec SFTP          │       │
-│    │  • Apply data-level filter if configured      │       │
-│    │  • No temporary files created                 │       │
-│    └───────────┬───────────────────────────────────┘       │
-│                ↓                                             │
-│    ┌───────────────────────────────────────────────┐       │
-│    │ Export DuckDB Table → CSV                     │       │
-│    │  • Detect schema and map types                │       │
-│    │  • Write with Keboola manifest                │       │
-│    └───────────┬───────────────────────────────────┘       │
-│                ↓                                             │
-│    ┌───────────────────────────────────────────────┐       │
-│    │ Update State                                   │       │
-│    │  • Save file modification timestamp            │       │
-│    │  • Save max data timestamp                     │       │
-│    └───────────────────────────────────────────────┘       │
-└─────────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────┐
+│ For each config row:                                      │
+│                                                           │
+│  1. Connect to SFTP (paramiko)                            │
+│  2. Download <table>.sas7bdat to a local temp file        │
+│  3. Detect schema:                                        │
+│       • sample first 1000 rows with pyreadstat (default), │
+│         apply SAS format overrides for date / timestamp   │
+│       • or use SAS metadata only (infer_dtypes=false)     │
+│  4. Stream chunks (pyreadstat → polars.DataFrame):        │
+│       • apply incremental filter if configured            │
+│       • track max value of the incremental column         │
+│       • convert SAS-epoch numeric dates to date / string  │
+│       • format Date / Datetime columns                    │
+│       • map null_values strings to NULL                   │
+│  5. Append each chunk to <table>.csv via Polars           │
+│  6. Write the manifest (schema, PK, load type)            │
+│  7. Update state with the new max incremental value       │
+└───────────────────────────────────────────────────────────┘
 ```
-
-### Data Flow
-
-1. **SFTP Connection**: Component establishes secure SFTP connection using credentials
-2. **File Discovery**: Lists all `.sas7bdat` files in specified folder
-3. **Incremental Check**: Compares file modification times with stored state
-4. **Streaming Load**: DuckDB reads SAS files directly over SFTP network connection
-5. **Schema Detection**: DuckDB analyzes SAS metadata and converts to SQL types
-6. **Export**: Data written to CSV with proper Keboola manifest for import
-7. **State Update**: Component saves processing state for next incremental run
 
 ## Configuration
 
-### SFTP Connection
+### Root configuration
 
-| Parameter | Required | Description |
-|-----------|----------|-------------|
-| Host | Yes | SFTP server hostname or IP address |
-| Port | No | SFTP port (default: 22) |
-| Username | Yes | SFTP username |
-| Password | Yes | SFTP password (encrypted) |
-| Folder Path | Yes | Path to folder containing SAS files (e.g., `/data/sas_files`) |
+| Parameter | Required | Default | Description |
+|-----------|----------|---------|-------------|
+| `sftp.host` | yes | — | SFTP server hostname or IP |
+| `sftp.port` | no | `22` | SFTP port |
+| `sftp.username` | yes | — | SFTP username |
+| `sftp.#password` | yes | — | SFTP password (encrypted) |
+| `sftp.folder_path` | yes | — | Absolute path on the SFTP server that contains `.sas7bdat` files |
+| `encoding` | no | `CP1250` | iconv-compatible encoding name. Allowed: `CP1250`, `CP1252`, `UTF-8`, `LATIN1`, `LATIN2`. |
+| `null_values` | no | `[]` | List of string literals to convert to NULL in string columns (e.g. `["NA", "N/A", "."]`). |
 
-### SAS Files
+### Row configuration
 
-Use the **"List Files"** button to populate available SAS files from the SFTP server. The component will display all `.sas7bdat` files in the configured folder.
+| Parameter | Required | Default | Description |
+|-----------|----------|---------|-------------|
+| `table` | yes | — | SAS filename (e.g. `customers.sas7bdat`). Populated via the **Re-load tables** sync action. |
+| `destination.load_type` | no | `full_load` | `full_load` overwrites the Storage table on every run; `incremental_load` appends/upserts. |
+| `destination.primary_key` | no | `null` | Columns marked as PK in the manifest. |
+| `incremental_column` | no | `null` | Column used for data-level incremental filtering. Only rows whose value is strictly greater than the value stored in state are loaded. Supports int, float, decimal, date, datetime, and string columns; also works on SAS-epoch numeric date/datetime columns. |
+| `batch_size` | no | `10000` | pyreadstat chunk size. Lower → less memory, slower. |
+| `infer_dtypes` | no | `true` | When `true`, sample 1000 rows to infer types and merge with SAS format hints. When `false`, rely entirely on SAS metadata + format hints. |
+| `datetime_as_date` | no | `false` | When `true`, datetime columns are written as `YYYY-MM-DD` (the time part is dropped). Default keeps the full `YYYY-MM-DD HH:MM:SS`. |
+| `debug` | no | `false` | Currently a no-op placeholder. |
 
-### Incremental Loading
+### Example configuration
 
-#### File-Level Incremental (default: enabled)
-
-- Tracks modification timestamps of processed files
-- Only processes files that are new or have been modified since last run
-- State stored in Keboola's state file
-
-#### Data-Level Incremental (default: disabled)
-
-- Within each file, only loads rows with timestamps newer than last processing
-- Requires specifying a **Timestamp Column** in the SAS file
-- Combines with file-level incremental for maximum efficiency
-
-### Output Settings
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| Primary Key | None | Column(s) to use as primary key in Keboola Storage |
-| Incremental Write | false | Write to Storage in incremental mode (append/update) |
-| Preserve Insertion Order | true | Maintain row order from source SAS files |
-
-### Advanced Settings
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| DuckDB Maximum Memory (MB) | 1024 | Memory limit for DuckDB (128-16384 MB) |
-| Debug Mode | false | Enable detailed debug logging |
-
-## Example Configuration
+Root:
 
 ```json
 {
@@ -133,195 +84,135 @@ Use the **"List Files"** button to populate available SAS files from the SFTP se
     "host": "sftp.example.com",
     "port": 22,
     "username": "sas_user",
-    "#password": "encrypted_password",
+    "#password": "KBC::ProjectSecure::sftpPassword",
     "folder_path": "/data/sas_exports"
   },
-  "sas_files": [
-    "customers.sas7bdat",
-    "orders.sas7bdat",
-    "products.sas7bdat"
-  ],
-  "incremental": {
-    "file_level_incremental": true,
-    "data_level_incremental": true,
-    "timestamp_column": "last_updated"
-  },
-  "output": {
-    "primary_key": ["customer_id"],
-    "incremental": true
-  },
-  "duckdb_max_memory_mb": 2048,
-  "debug": false
+  "encoding": "CP1250",
+  "null_values": ["NA", "N/A", "."]
 }
 ```
 
+Row:
+
+```json
+{
+  "table": "customers.sas7bdat",
+  "destination": {
+    "load_type": "incremental_load",
+    "primary_key": ["id"]
+  },
+  "incremental_column": "last_updated",
+  "batch_size": 10000,
+  "infer_dtypes": true,
+  "datetime_as_date": false
+}
+```
+
+## Incremental loading
+
+Set `incremental_column` to enable data-level incremental loading. On each run:
+
+1. The component reads `last_incremental_value` from the row's state file.
+2. Each chunk is filtered to rows where `incremental_column > last_incremental_value`.
+3. The maximum value of `incremental_column` across all chunks is written back to state.
+
+State stores the value as a string in column-native form (`"2024-01-15"` for dates, `"2024-01-15 13:42:00"` for datetimes, the literal number for ints/floats). SAS-epoch numeric date/datetime columns are translated to ISO date strings in state, then back to SAS-epoch numbers during filtering — comparisons stay in the column's native type.
+
+Combine `incremental_column` with `destination.load_type = "incremental_load"` so new rows are appended to Storage, not overwritten.
+
 ## Output
 
-The component creates one Keboola Storage table per SAS file:
+Each row produces one Storage table:
 
-- **Table Name**: Derived from SAS filename (e.g., `customers.sas7bdat` → `customers` table)
-- **Schema**: Automatically detected from SAS file metadata
-- **Type Mapping**: SAS types converted to Keboola supported types
+- **Table name**: SAS filename without the `.sas7bdat` extension.
+- **Manifest schema**: derived from pyreadstat dtypes plus SAS format hints (see below).
+- **Primary key**: `destination.primary_key` if provided.
+- **Load mode**: `destination.load_type`.
 
-### Type Conversion
+### Type mapping
 
-| SAS/DuckDB Type | Keboola Type |
-|-----------------|--------------|
-| INTEGER, BIGINT, SMALLINT | INTEGER |
-| DECIMAL, NUMERIC | NUMERIC |
-| DOUBLE, FLOAT | FLOAT |
-| BOOLEAN | BOOLEAN |
-| TIMESTAMP | TIMESTAMP |
-| DATE | DATE |
-| VARCHAR, TEXT, Others | STRING |
+The component derives a type string per column (from a Polars sample or from SAS metadata), then maps it to a Keboola type via substring match:
 
-## Incremental Loading Behavior
+| Detected type string contains | Keboola type |
+|-------------------------------|--------------|
+| `int` | `INTEGER` |
+| `decimal`, `numeric` | `NUMERIC` |
+| `float`, `double`, `real` | `FLOAT` |
+| `bool` | `BOOLEAN` |
+| `datetime`, `timestamp` | `TIMESTAMP` |
+| `date` | `DATE` |
+| anything else | `STRING` |
 
-### Example Scenarios
+SAS format overrides apply for both `infer_dtypes` modes. Recognized SAS date formats (DATE, DDMMYY, MMDDYY, YYMMDD, JULIAN, MONYY, WEEKDATE, …) map to `DATE`; recognized datetime formats (DATETIME, DATEAMPM, DTDATE, …) map to `TIMESTAMP`.
 
-#### Scenario 1: File-Level Only
+## Sync actions
 
-```yaml
-Configuration:
-  file_level_incremental: true
-  data_level_incremental: false
-
-First Run:
-  - customers.sas7bdat (modified: 2024-01-01 10:00)  → Processed (1000 rows)
-  - orders.sas7bdat (modified: 2024-01-01 11:00)     → Processed (5000 rows)
-
-Second Run (no changes):
-  - customers.sas7bdat (modified: 2024-01-01 10:00)  → Skipped
-  - orders.sas7bdat (modified: 2024-01-01 11:00)     → Skipped
-
-Third Run (customers updated):
-  - customers.sas7bdat (modified: 2024-01-02 14:00)  → Processed (1050 rows)
-  - orders.sas7bdat (modified: 2024-01-01 11:00)     → Skipped
-```
-
-#### Scenario 2: File-Level + Data-Level
-
-```yaml
-Configuration:
-  file_level_incremental: true
-  data_level_incremental: true
-  timestamp_column: "last_updated"
-
-First Run:
-  - customers.sas7bdat → Processed (1000 rows, max timestamp: 2024-01-01 12:00)
-
-Second Run (file modified, new data added):
-  - customers.sas7bdat → Processed (50 NEW rows where last_updated > 2024-01-01 12:00)
-```
+| Action | Purpose |
+|--------|---------|
+| `testConnection` | Opens an SFTP connection with the configured credentials. Used by the **Test connection** button on the root config. |
+| `list_sas_tables` | Lists `.sas7bdat` files in `sftp.folder_path` and populates the table selector on rows. |
+| `prepareRows` | Returns one row template per entry in `init_tables` (used for bulk row generation from the UI). |
 
 ## Development
 
-### Local Development Setup
+### Local development
 
-1. Clone the repository:
 ```bash
 git clone https://github.com/keboola/component-ex-sas component-sas
 cd component-sas
-```
-
-2. Build the Docker image:
-```bash
 docker-compose build
-```
-
-3. Create local configuration in `data/config.json`
-
-4. Run the component:
-```bash
 docker-compose run --rm dev
 ```
 
-### Running Tests
+The component reads its config from `data/config.json` and writes output to `data/out/tables/`.
 
-Execute the test suite:
+### Running tests
+
 ```bash
 docker-compose run --rm test
 ```
 
-This runs:
-- Unit tests for configuration validation
-- State management tests
-- Type conversion tests
-- Integration tests (mocked)
+The image runs `ruff check .` and `python -m unittest discover` (see `scripts/build_n_test.sh`).
 
-### Project Structure
+### Project layout
 
 ```
 component-sas/
 ├── src/
-│   ├── component.py           # Main component logic
-│   ├── configuration.py       # Pydantic configuration models
-│   ├── sftp_manager.py        # SFTP connection handling
-│   ├── duckdb_manager.py      # DuckDB operations
-│   └── state_manager.py       # Incremental state tracking
+│   ├── component.py                 # ComponentBase entrypoint, sync actions
+│   ├── configuration.py             # Pydantic configuration models
+│   ├── sftp_client.py               # paramiko-based SFTP wrapper
+│   └── sas_to_csv_converter.py      # pyreadstat → Polars → CSV pipeline
 ├── tests/
-│   └── test_component.py      # Unit tests
-├── component_config/
-│   ├── configSchema.json      # UI configuration schema
-│   └── ...                    # Component metadata
-├── pyproject.toml             # Python dependencies
-└── Dockerfile                 # Container definition
+│   └── test_component.py            # Unit tests
+├── component_config/                # Schemas + UI descriptions
+├── pyproject.toml                   # uv-managed dependencies
+└── Dockerfile
 ```
 
 ## Troubleshooting
 
-### Connection Issues
+### `SFTP authentication failed`
+Verify username/password. Confirm the SFTP server accepts password authentication and that the source IP is allowed.
 
-**Problem**: `SFTP authentication failed`
+### `SFTP folder not found`
+`sftp.folder_path` must be an absolute path that the user can list. Trailing slashes are normalized; the literal root `/` is preserved.
 
-**Solution**:
-- Verify username and password are correct
-- Ensure SFTP server allows password authentication
-- Check if IP whitelisting is required
+### `Cannot apply incremental filter on '<col>': stored value '<value>' is incompatible with column type '<dtype>'`
+The state file holds a value that can't be parsed against the column's current dtype (e.g. the column type changed in the source). Delete the state file or correct the type, then re-run.
 
----
+### Mojibake / unreadable text in string columns
+The default `encoding` is `CP1250` (used by Czech / Slovak / Hungarian SAS exports). For UTF-8 SAS files set `encoding` to `UTF-8` on the root config.
 
-**Problem**: `SFTP folder not found`
-
-**Solution**:
-- Verify folder path is absolute (starts with `/`)
-- Check folder exists and is accessible with provided credentials
-- Ensure proper permissions on SFTP folder
-
-### Performance Issues
-
-**Problem**: `Out of memory errors`
-
-**Solution**:
-- Increase `duckdb_max_memory_mb` setting
-- Process fewer files per run
-- Enable file-level incremental to reduce data volume
-
----
-
-**Problem**: `Slow processing for large files`
-
-**Solution**:
-- Network speed between component and SFTP server affects performance
-- DuckDB automatically spills to disk for large datasets
-- Consider splitting very large SAS files if possible
-
-### Data Issues
-
-**Problem**: `Column type mismatch`
-
-**Solution**:
-- Component automatically detects types from SAS metadata
-- Check SAS file schema if unexpected type conversions occur
-- Types default to STRING if cannot be mapped
+### Manifest type doesn't match the CSV contents
+This generally points to a SAS column whose original format isn't in the built-in format map. Open an issue with the SAS format name (`PROC CONTENTS` output is enough).
 
 ## Integration
 
-For deployment and integration with Keboola Connection, refer to the [deployment section of the developer documentation](https://developers.keboola.com/extend/component/deployment/).
+For deployment instructions, see the [Keboola developer documentation](https://developers.keboola.com/extend/component/deployment/).
 
 ## Support
 
-For issues, feature requests, or questions:
-- Submit issues to [GitHub repository](https://github.com/keboola/component-ex-sas)
-- Feature requests: [ideas.keboola.com](https://ideas.keboola.com/)
-- Keboola Support: support@keboola.com
+- Bug reports / feature requests: [GitHub issues](https://github.com/keboola/component-ex-sas)
+- Product feedback: [ideas.keboola.com](https://ideas.keboola.com/)
+- Customer support: support@keboola.com
