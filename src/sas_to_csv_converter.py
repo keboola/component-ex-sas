@@ -431,23 +431,17 @@ class SasToCsvConverter:
             if sas_datetime_exprs:
                 df = df.with_columns(sas_datetime_exprs)
 
-            # Format date columns to YYYY-MM-DD and datetime columns to full timestamp
-            # (or to YYYY-MM-DD when datetime_as_date is enabled).
-            for col in df.columns:
-                col_dtype = df[col].dtype
-                if col_dtype == pl.Date:
-                    df = df.with_columns(pl.col(col).dt.strftime("%Y-%m-%d").alias(col))
-                elif isinstance(col_dtype, pl.Datetime):
-                    fmt = "%Y-%m-%d" if self.datetime_as_date else "%Y-%m-%d %H:%M:%S"
-                    df = df.with_columns(pl.col(col).dt.strftime(fmt).alias(col))
-
-            # Replace null values with empty string (NULL in CSV)
+            # Apply all per-chunk transformations in a single with_columns call.
+            # Polars dtype selectors fan out to all matching columns inside the engine,
+            # so there is no Python-level iteration over columns regardless of table width.
+            datetime_fmt = "%Y-%m-%d" if self.datetime_as_date else "%Y-%m-%d %H:%M:%S"
+            transform_exprs = [
+                pl.col(pl.Date).dt.strftime("%Y-%m-%d"),
+                pl.col(pl.Datetime).dt.strftime(datetime_fmt),
+            ]
             if self.null_values:
-                for col in df.columns:
-                    if df[col].dtype == pl.Utf8 or df[col].dtype == pl.String:
-                        df = df.with_columns(
-                            pl.when(pl.col(col).is_in(self.null_values)).then(None).otherwise(pl.col(col)).alias(col)
-                        )
+                transform_exprs.append(pl.col(pl.String).replace(self.null_values, None))
+            df = df.with_columns(transform_exprs)
 
             # Write using Polars native CSV writer
             if first_chunk:
