@@ -260,7 +260,14 @@ class SasToCsvConverter:
                 return datetime.fromisoformat(value_str)
             if "date" in dtype_str:
                 return date.fromisoformat(value_str)
-            if any(t in dtype_str for t in ("int", "float", "decimal")):
+            if "int" in dtype_str:
+                # Parse as int to preserve precision for values > 2^53.
+                # Tolerate stored floats like "42.0" by routing through float first.
+                try:
+                    return int(value_str)
+                except ValueError:
+                    return int(float(value_str))
+            if any(t in dtype_str for t in ("float", "decimal")):
                 return float(value_str)
             return value_str
         except (ValueError, TypeError) as e:
