@@ -68,4 +68,4 @@ class Configuration(BaseModel):
         Returns:
             Table name (e.g., 'customers')
         """
-        return sas_filename.replace(".sas7bdat", "")
+        return sas_filename.removesuffix(".sas7bdat")

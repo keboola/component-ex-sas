@@ -344,7 +344,8 @@ class SasToCsvConverter:
             last_incremental_value: Last incremental value to filter from (optional)
 
         Returns:
-            Total number of rows converted
+            Tuple of (total_rows, new_max_incremental_value_as_string). The second element is
+            `None` when no incremental field is configured or no rows were observed.
         """
         logging.info(f"Converting SAS to CSV with chunk size {self.batch_size:,}")
 
@@ -378,7 +379,7 @@ class SasToCsvConverter:
         first_chunk = True
         running_max = None  # Native max value of incremental column across all chunks
 
-        for df, meta in reader:
+        for df, _ in reader:
             chunk_num += 1
             chunk_start = time.time()
 
