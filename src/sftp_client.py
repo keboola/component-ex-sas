@@ -14,7 +14,7 @@ from configuration import SftpConnection
 class FileMetadata:
     """Metadata for a file on SFTP server."""
 
-    def __init__(self, filename: str, mtime: float, size: int):
+    def __init__(self, filename: str, mtime: float, size: int) -> None:
         self.filename = filename
         self.mtime = mtime  # Last modification timestamp
         self.size = size  # File size in bytes
@@ -27,7 +27,7 @@ class SftpClient:
     Uses paramiko for file listing and downloading.
     """
 
-    def __init__(self, config: SftpConnection):
+    def __init__(self, config: SftpConnection) -> None:
         """
         Initialize SFTP client.
 
@@ -39,7 +39,7 @@ class SftpClient:
         self.sftp_client: paramiko.SFTPClient | None = None
         self._connected = False
 
-    def connect(self):
+    def connect(self) -> None:
         """
         Establish SFTP connections.
 
@@ -119,7 +119,7 @@ class SftpClient:
         except Exception as e:
             raise UserException(f"Failed to list files from SFTP: {e}")
 
-    def download_file(self, remote_path: str, local_path: str):
+    def download_file(self, remote_path: str, local_path: str) -> None:
         """
         Download a file from SFTP using optimized get.
 
@@ -142,7 +142,7 @@ class SftpClient:
             last_bytes_transferred = 0
             log_interval = 500 * 1024 * 1024  # 500 MB
 
-            def progress_callback(transferred: int, total: int):
+            def progress_callback(transferred: int, total: int) -> None:
                 nonlocal last_bytes_transferred, last_progress_time
                 if transferred - last_bytes_transferred >= log_interval:
                     current_time = time.time()
@@ -208,7 +208,7 @@ class SftpClient:
         base = self.config.folder_path
         return f"/{filename}" if base == "/" else f"{base}/{filename}"
 
-    def close(self):
+    def close(self) -> None:
         """
         Close all SFTP connections.
         """

@@ -34,7 +34,7 @@ class SasToCsvConverter:
         encoding: str | None = None,
         infer_dtypes: bool = True,
         datetime_as_date: bool = False,
-    ):
+    ) -> None:
         """
         Args:
             batch_size: Number of rows to process at once (default: 100k for optimal performance)
@@ -62,7 +62,7 @@ class SasToCsvConverter:
         sftp_url: str,
         table_name: str,
         sftp_client: SftpClient,
-    ) -> tuple[str, dict]:
+    ) -> tuple[str, dict[str, str]]:
         """
         Download SAS file from SFTP and infer its schema.
 
@@ -161,7 +161,7 @@ class SasToCsvConverter:
                 except Exception as e:
                     logging.warning(f"Failed to remove temp file: {e}")
 
-    def _detect_schema_from_sample(self, sas_file_path: str) -> dict:
+    def _detect_schema_from_sample(self, sas_file_path: str) -> dict[str, str]:
         """
         Detect schema from SAS file using pyreadstat with Polars output.
 
@@ -217,7 +217,7 @@ class SasToCsvConverter:
 
             return schema
 
-    def _detect_schema_from_metadata(self, sas_file_path: str) -> dict:
+    def _detect_schema_from_metadata(self, sas_file_path: str) -> dict[str, str]:
         _, meta = pyreadstat.read_sas7bdat(sas_file_path, metadataonly=True, encoding=self.encoding)
         raw_types = dict(meta.readstat_variable_types)
         original_formats = dict(meta.original_variable_types)
@@ -236,9 +236,9 @@ class SasToCsvConverter:
         value_str: str,
         col_name: str,
         col_dtype: pl.DataType,
-        sas_date_cols: set,
-        sas_datetime_cols: set,
-    ):
+        sas_date_cols: set[str],
+        sas_datetime_cols: set[str],
+    ) -> float | int | datetime | date | str:
         """
         Parse stored incremental value (string) into a value comparable against the column's native dtype.
 
@@ -277,10 +277,10 @@ class SasToCsvConverter:
 
     @staticmethod
     def _format_incremental_value(
-        value,
+        value: object,
         col_name: str,
-        sas_date_cols: set,
-        sas_datetime_cols: set,
+        sas_date_cols: set[str],
+        sas_datetime_cols: set[str],
     ) -> str:
         """Format a native max value back to a string suitable for state storage."""
         sas_epoch = datetime(1960, 1, 1)
@@ -474,7 +474,11 @@ class SasToCsvConverter:
 
         return total_rows, new_max_str
 
-    def convert_schema_to_keboola(self, schema_dict: dict, primary_key_columns: list[str] | None = None) -> OrderedDict:
+    def convert_schema_to_keboola(
+        self,
+        schema_dict: dict[str, str],
+        primary_key_columns: list[str] | None = None,
+    ) -> OrderedDict[str, ColumnDefinition]:
         """
         Convert schema dictionary to Keboola schema format.
 

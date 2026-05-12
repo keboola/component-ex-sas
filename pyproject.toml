@@ -2,10 +2,9 @@
 name = "sas"
 dynamic = ["version"]
 readme = "README.md"
-requires-python = "~=3.13"
+requires-python = "~=3.13.0"
 dependencies = [
     "keboola-component>=1.6.10",
-    "mock>=5.2.0",
     # pandas is a hard runtime dep of pyreadstat: it imports pandas whenever
     # output_format is unset (the default for metadata-only reads, including
     # the one done internally inside pyreadstat.read_file_in_chunks).
@@ -14,7 +13,16 @@ dependencies = [
     "polars>=1.0.0",
     "pyreadstat>=1.2.0",
     "pydantic>=2.11.3",
-    "ruff>=0.11.5",
+]
+
+[dependency-groups]
+dev = [
+    "keboola.datadirtest>=2.2.0",
+    "mock>=5.2.0",
+    "pre-commit>=4.5.0",
+    "pytest>=9.0.2",
+    "ruff>=0.15.2",
+    "ty>=0.0.24",
 ]
 
 [tool.ruff]
@@ -25,3 +33,15 @@ extend-exclude = [
     "venv",
 ]
 
+[tool.ruff.lint]
+extend-select = [
+    "I",   # isort – import sorting
+    "UP",  # pyupgrade – modern Python syntax
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.ty.environment]
+extra-paths = ["src"]

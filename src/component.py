@@ -21,7 +21,7 @@ class Component(ComponentBase):
     SAS File Extractor component.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.params = Configuration(**self.configuration.parameters)
 
@@ -44,7 +44,7 @@ class Component(ComponentBase):
                     self._last_incremental_value = str(stored)
                     logging.info(f"Loaded last incremental value: {self._last_incremental_value}")
 
-    def run(self):
+    def run(self) -> None:
         start_time = datetime.now()
 
         try:
@@ -137,7 +137,7 @@ class Component(ComponentBase):
         return row_count, new_incremental_value
 
     @sync_action("list_sas_tables")
-    def list_sas_tables(self):
+    def list_sas_tables(self) -> list[SelectElement]:
         """Sync action to list SAS files from SFTP server."""
         try:
             self.sftp_client.connect()
@@ -152,7 +152,7 @@ class Component(ComponentBase):
             raise UserException(f"Failed to list SAS files: {e}")
 
     @sync_action("testConnection")
-    def test_connection(self):
+    def test_connection(self) -> None:
         """Sync action to test SFTP connection."""
         try:
             self.sftp_client.connect()
@@ -162,9 +162,9 @@ class Component(ComponentBase):
             self.sftp_client.close()
 
     @sync_action("prepareRows")
-    def prepare_rows(self):
+    def prepare_rows(self) -> list[dict]:
         rows = []
-        for table in self.params.init_tables:
+        for table in self.params.init_tables or []:
             row = {
                 "name": table,
                 "description": f"SAS table: {table}",
