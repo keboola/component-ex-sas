@@ -7,14 +7,33 @@ services:
         - ./data:/data
     environment:
       - KBC_DATADIR=./data
+
   test:
-    # Use to run flake8 and unittests checks
-    build: .
+    build:
+      context: .
+      target: test
     volumes:
       - ./:/code
-      - ./data:/data
     environment:
       - KBC_DATADIR=./data
+      - SFTP_HOST=sftp
+      - SFTP_PORT=22
+    depends_on:
+      sftp:
+        condition: service_started
     command:
       - /bin/sh
-      - /code/scripts/build_n_test.sh
+      - -c
+      - |
+        echo "Waiting for SFTP server to be ready..."
+        sleep 3
+        /bin/sh /code/scripts/build_n_test.sh
+
+  # SFTP server for functional tests
+  sftp:
+    image: atmoz/sftp
+    volumes:
+      - ./tests/sftp-data:/home/testuser/upload
+    command: testuser:testpass:::upload
+    ports:
+      - "2222:22"

@@ -1,5 +1,5 @@
 #!/bin/sh
 set -e
 
-ruff check .
-python -m unittest discover
+ruff check src/ tests/
+python -m pytest tests/ -v
