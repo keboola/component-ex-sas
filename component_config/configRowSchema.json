@@ -1,1 +1,89 @@
-{}
+{
+  "type": "object",
+  "title": "Configuration",
+  "required": [],
+  "properties": {
+    "table": {
+      "enum": [],
+      "type": "string",
+      "title": "Table to extract",
+      "description": "Select a SAS table to extract",
+      "options": {
+        "tags": true,
+        "creatable": true,
+        "async": {
+          "label": "Re-load tables",
+          "action": "list_sas_tables"
+        }
+      },
+      "propertyOrder": 1
+    },
+    "destination": {
+      "type": "object",
+      "title": "Destination",
+      "description": "Configure output table destination settings",
+      "properties": {
+        "load_type": {
+          "type": "string",
+          "title": "Load Type",
+          "description": "Type of load: full load or incremental load",
+          "enum": [
+            "full_load",
+            "incremental_load"
+          ],
+          "default": "full_load",
+          "propertyOrder": 1
+        },
+        "primary_key": {
+          "type": "array",
+          "title": "Primary Key",
+          "description": "Column(s) to use as primary key in Keboola Storage",
+          "items": {
+            "type": "string"
+          },
+          "format": "select",
+          "options": {
+            "tags": true
+          },
+          "uniqueItems": true,
+          "propertyOrder": 2
+        }
+      },
+      "propertyOrder": 2
+    },
+    "incremental_column": {
+      "type": "string",
+      "title": "Incremental Column",
+      "description": "Column name for incremental extraction (timestamp or numeric). Only extracts rows greater than last run value.",
+      "propertyOrder": 3
+    },
+    "batch_size": {
+      "type": "integer",
+      "title": "Batch Size",
+      "description": "Number of rows to process at once (lower = less memory, slower)",
+      "default": 10000,
+      "propertyOrder": 5
+    },
+    "infer_dtypes": {
+      "type": "boolean",
+      "title": "Infer Data Types",
+      "description": "Infer column data types from data sample. If false, use SAS metadata types.",
+      "default": true,
+      "propertyOrder": 6
+    },
+    "datetime_as_date": {
+      "type": "boolean",
+      "title": "Output datetimes as dates",
+      "description": "If enabled, datetime columns are written as YYYY-MM-DD (time component dropped). Disabled by default - full timestamp is preserved.",
+      "default": false,
+      "propertyOrder": 7
+    },
+    "debug": {
+      "type": "boolean",
+      "title": "Debug Mode",
+      "description": "Enable detailed debug logging",
+      "default": false,
+      "propertyOrder": 8
+    }
+  }
+}

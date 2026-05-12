@@ -1,19 +1,92 @@
 {
   "type": "object",
-  "title": "extractor configuration",
+  "title": "Authentication",
   "required": [
-    "print_hello"
+    "sftp"
   ],
   "properties": {
-    "print_hello": {
-      "type": "boolean",
-      "title": "Print Hello",
+    "sftp": {
+      "type": "object",
+      "title": "Authentication",
+      "required": [
+        "host",
+        "username",
+        "#password",
+        "folder_path"
+      ],
+      "properties": {
+        "host": {
+          "type": "string",
+          "title": "SFTP Host",
+          "description": "SFTP server hostname or IP address",
+          "minLength": 1,
+          "propertyOrder": 1
+        },
+        "port": {
+          "type": "integer",
+          "title": "SFTP Port",
+          "description": "SFTP server port (default: 22)",
+          "default": 22,
+          "minimum": 1,
+          "maximum": 65535,
+          "propertyOrder": 2
+        },
+        "username": {
+          "type": "string",
+          "title": "Username",
+          "description": "SFTP username",
+          "minLength": 1,
+          "propertyOrder": 3
+        },
+        "#password": {
+          "type": "string",
+          "title": "Password",
+          "description": "SFTP password (encrypted)",
+          "format": "password",
+          "minLength": 1,
+          "propertyOrder": 4
+        },
+        "folder_path": {
+          "type": "string",
+          "title": "Folder Path",
+          "description": "Path to folder containing SAS files on SFTP server (e.g., /folder/subfolder)",
+          "minLength": 1,
+          "propertyOrder": 5
+        }
+      },
       "propertyOrder": 1
     },
-    "debug": {
-      "type": "boolean",
-      "title": "Debug",
+    "encoding": {
+      "type": "string",
+      "title": "SAS File Encoding",
+      "description": "Encoding of SAS files (iconv-compatible name). WLATIN2 = CP1250, WLATIN1 = CP1252, UTF-8 = UTF-8",
+      "default": "CP1250",
+      "enum": [
+        "CP1250",
+        "CP1252",
+        "UTF-8",
+        "LATIN1",
+        "LATIN2"
+      ],
       "propertyOrder": 2
+    },
+    "null_values": {
+      "type": "array",
+      "title": "Null Values",
+      "description": "List of strings to treat as NULL values (e.g., 'NA', 'N/A', '.')",
+      "items": {
+        "type": "string"
+      },
+      "default": [],
+      "options": {
+        "tags": true
+      },
+      "propertyOrder": 3
+    },
+    "test_connection": {
+      "type": "button",
+      "format": "test-connection",
+      "propertyOrder": 4
     }
   }
 }

@@ -1,0 +1,12 @@
+{
+  "parameters": {
+    "sftp": {
+      "host": "sftp",
+      "port": 22,
+      "username": "testuser",
+      "#password": "testpass",
+      "folder_path": "/upload"
+    },
+    "table": "sample_table.sas7bdat"
+  }
+}

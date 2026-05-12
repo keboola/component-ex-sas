@@ -1,99 +1,183 @@
 """
-Template Component main class.
+SAS File Extractor Component.
 
+Extracts SAS (.sas7bdat) files from SFTP server and writes to Keboola Storage as CSV.
 """
 
-import csv
 import logging
 from datetime import datetime
 
-from keboola.component.base import ComponentBase
+from keboola.component.base import ComponentBase, sync_action
 from keboola.component.exceptions import UserException
+from keboola.component.sync_actions import SelectElement
 
 from configuration import Configuration
+from sas_to_csv_converter import SasToCsvConverter
+from sftp_client import SftpClient
 
 
 class Component(ComponentBase):
     """
-    Extends base class for general Python components. Initializes the CommonInterface
-    and performs configuration validation.
-
-    For easier debugging the data folder is picked up by default from `../data` path,
-    relative to working directory.
-
-    If `debug` parameter is present in the `config.json`, the default logger is set to verbose DEBUG mode.
+    SAS File Extractor component.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
+        self.params = Configuration(**self.configuration.parameters)
 
-    def run(self):
+        self.sftp_client = SftpClient(self.params.sftp)
+        self.converter = SasToCsvConverter(
+            batch_size=self.params.batch_size,
+            null_values=self.params.null_values,
+            encoding=self.params.encoding,
+            infer_dtypes=self.params.infer_dtypes,
+            datetime_as_date=self.params.datetime_as_date,
+        )
+
+        # Load last incremental value from state file (stored as string in column-native format)
+        self._last_incremental_value: str | None = None
+        if self.params.incremental_column:
+            state = self.get_state_file()
+            if state:
+                stored = state.get("last_incremental_value")
+                if stored is not None:
+                    self._last_incremental_value = str(stored)
+                    logging.info(f"Loaded last incremental value: {self._last_incremental_value}")
+
+    def run(self) -> None:
+        start_time = datetime.now()
+
+        try:
+            self.sftp_client.connect()
+
+            # Check if table is specified
+            if not self.params.table:
+                raise UserException("No table specified. Please select a table to extract.")
+
+            sas_file = self.params.table
+            logging.info(f"Processing file: {sas_file}")
+
+            # Process the file
+            row_count, new_incremental_value = self._process_sas_file(
+                sftp_client=self.sftp_client,
+                converter=self.converter,
+                sas_file=sas_file,
+            )
+
+            # Summary
+            duration = (datetime.now() - start_time).total_seconds()
+            if row_count > 0:
+                logging.info(f"Extraction complete: {row_count:,} rows extracted in {duration:.2f} seconds")
+            else:
+                logging.info(f"No data found in {sas_file}")
+
+            # Save state if incremental column is specified — preserve previous value if no new max found
+            if self.params.incremental_column:
+                final_value = (
+                    new_incremental_value if new_incremental_value is not None else self._last_incremental_value
+                )
+                if final_value is not None:
+                    self.write_state_file({"last_incremental_value": final_value})
+                    logging.info(f"Saved state: last_incremental_value = {final_value}")
+
+        finally:
+            self.sftp_client.close()
+
+    def _process_sas_file(
+        self,
+        sftp_client: SftpClient,
+        converter: SasToCsvConverter,
+        sas_file: str,
+    ) -> tuple[int, str | None]:
         """
-        Main execution code
+        Process a single SAS file: infer schema first, then create table definition and write CSV.
         """
+        table_name = self.params.get_table_name(sas_file)
+        sftp_url = sftp_client.get_sftp_url(sas_file)
 
-        # ####### EXAMPLE TO REMOVE
-        # check for missing configuration parameters
-        params = Configuration(**self.configuration.parameters)
+        logging.info(f"Processing {sas_file}")
 
-        # Access parameters in configuration
-        if params.print_hello:
-            logging.info("Hello World")
+        # Step 1: Infer schema from SAS file (downloads and analyzes structure)
+        temp_file, schema_dict = converter.infer_sas_schema(
+            sftp_url=sftp_url,
+            table_name=table_name,
+            sftp_client=sftp_client,
+        )
 
-        # get input table definitions
-        input_tables = self.get_input_tables_definitions()
-        for table in input_tables:
-            logging.info(f"Received input table: {table.name} with path: {table.full_path}")
+        # Step 2: Convert schema to Keboola format
+        keboola_schema = converter.convert_schema_to_keboola(
+            schema_dict, primary_key_columns=self.params.destination.primary_key
+        )
+        logging.debug(f"Converted schema: {keboola_schema}")
 
-        if len(input_tables) == 0:
-            raise UserException("No input tables found")
+        # Step 3: Create output table definition WITH schema
+        out_table = self.create_out_table_definition(
+            f"{table_name}.csv",
+            incremental=self.params.destination.incremental,
+            has_header=True,
+            schema=keboola_schema,
+        )
 
-        # get last state data/in/state.json from previous run
-        previous_state = self.get_state_file()
-        logging.info(previous_state.get("some_parameter"))
+        # Step 4: Convert SAS to CSV (uses already downloaded temp file)
+        row_count, new_incremental_value = converter.convert_sas_to_csv(
+            temp_file=temp_file,
+            output_path=out_table.full_path,
+            incremental_field=self.params.incremental_column,
+            last_incremental_value=self._last_incremental_value if self.params.incremental_column else None,
+        )
+        logging.info(f"Successfully processed {sas_file}")
 
-        # Create output table (Table definition - just metadata)
-        table = self.create_out_table_definition("output.csv", incremental=True, primary_key=["timestamp"])
+        if row_count == 0:
+            return 0, new_incremental_value
 
-        # get file path of the table (data/out/tables/Features.csv)
-        out_table_path = table.full_path
-        logging.info(out_table_path)
+        # Step 5: Write manifest
+        self.write_manifest(out_table)
 
-        # Add timestamp column and save into out_table_path
-        input_table = input_tables[0]
-        with (
-            open(input_table.full_path, "r") as inp_file,
-            open(table.full_path, mode="wt", encoding="utf-8", newline="") as out_file,
-        ):
-            reader = csv.DictReader(inp_file)
+        logging.info(f"Successfully streamed {row_count:,} rows to '{table_name}.csv'")
+        return row_count, new_incremental_value
 
-            columns = list(reader.fieldnames)
-            # append timestamp
-            columns.append("timestamp")
+    @sync_action("list_sas_tables")
+    def list_sas_tables(self) -> list[SelectElement]:
+        """Sync action to list SAS files from SFTP server."""
+        try:
+            self.sftp_client.connect()
 
-            # write result with column added
-            writer = csv.DictWriter(out_file, fieldnames=columns)
-            writer.writeheader()
-            for in_row in reader:
-                in_row["timestamp"] = datetime.now().isoformat()
-                writer.writerow(in_row)
+            try:
+                sas_tables = self.sftp_client.list_sas_files()
+                return [SelectElement(label=f, value=f) for f in sas_tables]
+            finally:
+                self.sftp_client.close()
 
-        # Save table manifest (output.csv.manifest) from the Table definition
-        self.write_manifest(table)
+        except Exception as e:
+            raise UserException(f"Failed to list SAS files: {e}")
 
-        # Write new state - will be available next run
-        self.write_state_file({"some_state_parameter": "value"})
+    @sync_action("testConnection")
+    def test_connection(self) -> None:
+        """Sync action to test SFTP connection."""
+        try:
+            self.sftp_client.connect()
+        except Exception as e:
+            raise UserException(f"Connection test failed: {str(e)}")
+        finally:
+            self.sftp_client.close()
 
-        # ####### EXAMPLE TO REMOVE END
+    @sync_action("prepareRows")
+    def prepare_rows(self) -> list[dict]:
+        rows = []
+        for table in self.params.init_tables or []:
+            row = {
+                "name": table,
+                "description": f"SAS table: {table}",
+                "configuration": {"parameters": {"table": table}},
+            }
+            rows.append(row)
+
+        return rows
 
 
-"""
-        Main entrypoint
-"""
 if __name__ == "__main__":
     try:
         comp = Component()
-        # this triggers the run method by default and is controlled by the configuration.action parameter
         comp.execute_action()
     except UserException as exc:
         logging.exception(exc)
